@@ -1,0 +1,1 @@
+export const WHATSAPP_GATEWAY = "WHATSAPP_GATEWAY";
