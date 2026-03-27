@@ -1,0 +1,10 @@
+.git
+node_modules
+npm-debug.log
+Dockerfile
+dist
+coverage
+.env
+.idea
+.vscode
+*.local

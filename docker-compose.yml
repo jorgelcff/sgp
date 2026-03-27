@@ -1,15 +1,13 @@
 version: "3.9"
 services:
-  postgres:
-    image: postgres:15
-    container_name: sgp-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sgp
+  app:
+    build: .
+    container_name: sgp-app
+    env_file: .env
     ports:
-      - "5433:5432"
+      - "3000:3000"
     volumes:
-      - sgp_pg_data:/var/lib/postgresql/data
-volumes:
-  sgp_pg_data:
+      - ./prisma:/app/prisma
+      - ./assets:/app/assets
+      - ./auth:/app/auth
+    restart: unless-stopped
