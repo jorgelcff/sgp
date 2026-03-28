@@ -25,18 +25,17 @@ export class WasenderService implements WhatsappGateway {
     imageUrl: string,
     caption?: string,
   ): Promise<void> {
-    const mediaPath = this.getMediaPath();
-    if (!mediaPath) {
-      await this.sendText(phone, `${caption ?? ""}\n${imageUrl}`.trim());
-      return;
+    // Wasender docs: image is sent via send-message with imageUrl and optional text.
+    const payload: Record<string, unknown> = {
+      to: formatPhone(phone),
+      imageUrl,
+    };
+
+    if (caption && caption.trim().length > 0) {
+      payload.text = caption;
     }
 
-    await this.post(mediaPath, {
-      to: formatPhone(phone),
-      mediaUrl: imageUrl,
-      caption: caption ?? "",
-      type: "image",
-    });
+    await this.post(this.getTextPath(), payload);
   }
 
   private async post(path: string, payload: Record<string, unknown>): Promise<void> {
@@ -69,9 +68,6 @@ export class WasenderService implements WhatsappGateway {
     return this.configService.get<string>("WASENDER_SEND_TEXT_PATH") ?? "send-message";
   }
 
-  private getMediaPath(): string | null {
-    return this.configService.get<string>("WASENDER_SEND_MEDIA_PATH") ?? "send-media";
-  }
 }
 
 function formatPhone(phone: string): string {

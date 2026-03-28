@@ -1,45 +1,63 @@
 # sgp-whatsapp-bot-simple
 
-Projeto NestJS para sincronizar clientes do SGP via paginacao offset/limit, persistir no SQLite e notificar via WhatsApp (Baileys).
+Bot NestJS com Prisma/SQLite para sincronizar clientes/títulos do SGP e operar atendimento/financeiro via WhatsApp.
 
 ## Arquitetura
 
-- SGP SaaS API (TSMX hosted)
 - NestJS backend
-- Prisma ORM
-- SQLite
-- Cron job (a cada 6 horas)
-- WhatsApp (Baileys)
+- Prisma ORM + SQLite (file:./prisma/sqlite.db)
+- Cron de sync/cobrança
+- Webhook WhatsApp (Wasender com webhook secret)
+- Static assets para planos (/assets/planos.jfif)
 
 ## Requisitos
 
-- Node.js 18+
+- Node.js 18+ (desenvolvimento)
+- Docker + Docker Compose (deploy)
 
-## Setup rapido
+## Variáveis de ambiente essenciais
 
-1. Configure o arquivo `.env`:
-   - Copie `.env.example` para `.env` e ajuste as variaveis.
-   - Exemplo de SQLite: `DATABASE_URL="file:./sgp.db"`
-   - SGP: `SGP_URL`, `SGP_USER`, `SGP_PASS`
-2. Instale dependencias:
-   - `npm install`
-3. Gere o Prisma Client e aplique schema:
-   - `npm run prisma:generate`
-   - `npm run prisma:dbpush`
-4. Rode a aplicacao:
-   - `npm run start:dev`
+- `DATABASE_URL="file:./prisma/sqlite.db"`
+- `SGP_URL`, `SGP_USER`, `SGP_PASS`
+- `APP_BASE_URL` (ex.: `http://seu-host:3000`)
+- `WHATSAPP_PROVIDER=wasender`
+- `WASENDER_BASE_URL`, `WASENDER_TOKEN`, `WASENDER_SEND_TEXT_PATH`, `WASENDER_SEND_MEDIA_PATH`
+- `WASENDER_WEBHOOK_SECRET` (para validar /webhook/whatsapp via header `x-webhook-secret` ou `?secret=`)
+- Throttle: `THROTTLE_TTL`, `THROTTLE_LIMIT`
+- Billing: `BILLING_MAX_PER_RUN`, `BILLING_DELAY_MS`, `BILLING_OVERDUE_DAYS`
 
-## Sincronizacao manual
+## Desenvolvimento local
 
-- `npm run sync`
-- `GET /sync/manual`
+1. `cp .env.example .env` e ajuste as variáveis.
+2. `npm install`
+3. `npm run prisma:generate` e `npm run prisma:dbpush`
+4. `npm run start:dev`
 
-## Observacoes
+Rotas úteis:
+- Health: `GET /health` (Basic Auth com `SGP_USER`/`SGP_PASS`)
+- Sync manual: `GET /sync/manual`
+- Webhook WhatsApp: `POST /webhook/whatsapp` (auth via `WASENDER_WEBHOOK_SECRET` ou Basic Auth)
+- Planos: `GET /planos/imagem` e `POST /planos/imagem` (multipart `file`) para servir/atualizar `assets/planos.jfif`
 
-- O WhatsApp **nao** consulta o SGP diretamente. Ele le apenas o SQLite.
-- O cron sincroniza clientes e titulos a cada 6 horas, depois roda a cobranca.
+## Deploy via Docker
 
-## Exemplo de query SQL (titulos vencidos)
+Imagem multi-stage (Debian) com Prisma Client incluso. Para subir:
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+docker compose logs -f app
+```
+
+O compose expõe a porta 3000 e monta `./prisma`, `./assets`, `./auth` no container. O banco SQLite persiste em `./prisma/sqlite.db` no host.
+
+## Observações
+
+- WhatsApp lê apenas o SQLite; mantenha o sync ativo.
+- Webhook pode usar Basic Auth (SGP_USER/SGP_PASS) ou o segredo dedicado (`WASENDER_WEBHOOK_SECRET`).
+- Health e demais rotas seguem com Basic Auth.
+
+## SQL de exemplo (títulos vencidos)
 
 ```sql
 SELECT
