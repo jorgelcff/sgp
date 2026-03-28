@@ -11,10 +11,11 @@ import { ContractFlowService } from "./flows/contract.flow";
 import { PaymentFlowService } from "./flows/payment.flow";
 import { WhatsappAdapterService } from "./whatsapp-adapter/whatsapp-adapter.service";
 import { SessionCron } from "./session/session.cron";
+import { PlanosController } from "./planos/planos.controller";
 
 @Module({
   imports: [WhatsappModule],
-  controllers: [WebhookController, SessionController],
+  controllers: [WebhookController, SessionController, PlanosController],
   providers: [
     ChatbotService,
     SessionService,
