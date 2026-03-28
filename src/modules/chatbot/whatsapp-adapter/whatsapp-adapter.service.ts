@@ -85,8 +85,9 @@ export class WhatsappAdapterService {
           maxDelay,
         );
         const delay = is429 ? scaled : Math.min(baseDelay / 2, scaled);
+        const detail = this.buildErrorDetail(error);
         this.logger.warn(
-          `Tentativa ${attempt}/${maxAttempts} falhou para ${target} (status=${status ?? "unknown"}).`,
+          `Tentativa ${attempt}/${maxAttempts} falhou para ${target} (status=${status ?? "unknown"}${detail ? ", " + detail : ""}).`,
         );
 
         if (attempt >= maxAttempts) {
@@ -103,5 +104,25 @@ export class WhatsappAdapterService {
       return error.message;
     }
     return String(error);
+  }
+
+  private buildErrorDetail(error: any): string {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+    const message =
+      (typeof data === "string" && data) ||
+      data?.message ||
+      data?.error ||
+      data?.detail;
+    if (!status && !message) {
+      return "";
+    }
+    if (status && message) {
+      return `erro=${message}`;
+    }
+    if (message) {
+      return `erro=${message}`;
+    }
+    return "";
   }
 }
