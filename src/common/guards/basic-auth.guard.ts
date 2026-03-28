@@ -13,6 +13,11 @@ export class BasicAuthGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
+
+    if (this.isValidWebhookSecret(request)) {
+      return true;
+    }
+
     const header = request.headers.authorization;
     if (!header || !header.toLowerCase().startsWith("basic ")) {
       throw new UnauthorizedException("Autenticacao necessaria.");
@@ -40,5 +45,28 @@ export class BasicAuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private isValidWebhookSecret(request: Request): boolean {
+    const expected = this.configService.get<string>("WASENDER_WEBHOOK_SECRET");
+    if (!expected) {
+      return false;
+    }
+
+    const isWhatsappWebhook = request.path?.startsWith("/webhook/whatsapp");
+    if (!isWhatsappWebhook) {
+      return false;
+    }
+
+    const headerSecret = request.headers["x-webhook-secret"];
+    const querySecret = request.query?.secret;
+    const received = Array.isArray(headerSecret)
+      ? headerSecret[0]
+      : (headerSecret as string | undefined) ??
+        (Array.isArray(querySecret)
+          ? querySecret[0]
+          : (querySecret as string | undefined));
+
+    return Boolean(received && expected && received === expected);
   }
 }
