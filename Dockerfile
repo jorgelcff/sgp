@@ -16,10 +16,11 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/auth ./auth
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev \
+	&& npx prisma generate
 CMD ["node", "dist/main.js"]
