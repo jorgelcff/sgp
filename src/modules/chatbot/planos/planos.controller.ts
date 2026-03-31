@@ -51,16 +51,16 @@ export class PlanosController {
   }
 
   private getPlanImagePath(): string {
-    return resolve(process.cwd(), "assets", "planos.jfif");
+    return resolve(process.cwd(), "assets", "planos.jpeg");
   }
 
   private buildPublicUrl(): string {
     const baseUrl = this.configService.get<string>("APP_BASE_URL");
     if (!baseUrl) {
-      return "/assets/planos.jfif";
+      return "/assets/planos.jpeg";
     }
 
     const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-    return `${cleanBase}/assets/planos.jfif`;
+    return `${cleanBase}/assets/planos.jpeg`;
   }
 }

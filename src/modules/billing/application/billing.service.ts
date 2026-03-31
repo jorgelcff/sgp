@@ -208,10 +208,12 @@ function buildMessageParts(params: {
 
   const valor = formatCurrency(params.valorCorrigido);
 
+  const nome = toTitleCase(params.nome);
+
   const statusInfo =
     params.diasAtraso > 0
-      ? `esta em atraso ha ${params.diasAtraso} dias`
-      : `vence em ${params.diasParaVencer} dias`;
+      ? `esta em atraso ha ${pluralizeDay(params.diasAtraso)}`
+      : `vence em ${pluralizeDay(params.diasParaVencer)}`;
 
   const linhaDigitavel = params.linhaDigitavel.trim();
   const boletoLine = linhaDigitavel ? linhaDigitavel : "nao informado";
@@ -220,7 +222,7 @@ function buildMessageParts(params: {
   const link = params.link.trim();
 
   const main =
-    `Ola ${params.nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
+    `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
     `Valor atualizado: ${valor}`;
 
   const pix = params.codigoPix.trim()
@@ -301,6 +303,20 @@ function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
   }).format(date);
+}
+
+function pluralizeDay(value: number): string {
+  if (value === 1) return "1 dia";
+  return `${value} dias`;
+}
+
+function toTitleCase(text: string): string {
+  return text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
+    .join(" ")
+    .trim();
 }
 
 function getErrorMessage(error: unknown): string {

@@ -84,8 +84,12 @@ export class StateMachineService {
         return this.handleFinanceMenu(message);
       case ChatState.FINANCEIRO_PEDIR_CPF:
         return this.handleFinanceCpf(message);
+      case ChatState.FINANCEIRO_PROMESSA:
+        return this.handleFinancePromessa(message);
       case ChatState.CONTRATAR_MENU:
-        return this.handleContract();
+        return this.handleContractMenu(message);
+      case ChatState.CONTRATAR_PEDIR_DADOS:
+        return this.handleContractForm(message);
       case ChatState.AGUARDANDO_COMPROVANTE:
         return this.paymentFlow.handlePayment(params.payload, params.context);
       default:
@@ -110,7 +114,10 @@ export class StateMachineService {
           responses: this.financeFlow.getFinanceMenu(),
         };
       case "3":
-        return this.handleContract();
+        return {
+          nextState: ChatState.CONTRATAR_MENU,
+          responses: this.contractFlow.getContractMenu(),
+        };
       case "4":
         return {
           nextState: ChatState.AGUARDANDO_COMPROVANTE,
@@ -212,14 +219,8 @@ export class StateMachineService {
 
     if (message === "3") {
       return {
-        nextState: ChatState.MENU_PRINCIPAL,
-        responses: [
-          {
-            type: "text",
-            text: "Desbloqueio solicitado. Aguarde a confirmacao.",
-          },
-          ...this.mainMenu(),
-        ],
+        nextState: ChatState.FINANCEIRO_PROMESSA,
+        responses: this.financeFlow.getPromessaPrompt(),
       };
     }
 
@@ -243,7 +244,72 @@ export class StateMachineService {
   }
 
   private handleContract(): StateMachineResult {
-    return this.contractFlow.handleContract();
+    return {
+      nextState: ChatState.CONTRATAR_MENU,
+      responses: this.contractFlow.getContractMenu(),
+    };
+  }
+
+  private async handleFinancePromessa(
+    message: string,
+  ): Promise<StateMachineResult> {
+    const result = await this.financeFlow.handlePromessa(message);
+    return {
+      nextState: result.nextState,
+      responses: [
+        ...result.responses,
+        ...(result.nextState === ChatState.MENU_PRINCIPAL
+          ? this.mainMenu()
+          : []),
+      ],
+    };
+  }
+
+  private handleContractMenu(message: string): StateMachineResult {
+    if (message === "1") {
+      return {
+        nextState: ChatState.CONTRATAR_PEDIR_DADOS,
+        responses: this.contractFlow.getPreCadastroPrompt(),
+      };
+    }
+
+    if (message === "2") {
+      return {
+        nextState: ChatState.MENU_PRINCIPAL,
+        responses: [
+          {
+            type: "text",
+            text: "Sem problemas. Envie suas duvidas aqui e nossa equipe retorna. Digite 0️⃣ para voltar ao menu principal.",
+          },
+          ...this.mainMenu(),
+        ],
+      };
+    }
+
+    if (message === "0") {
+      return {
+        nextState: ChatState.MENU_PRINCIPAL,
+        responses: this.mainMenu(),
+      };
+    }
+
+    return {
+      nextState: ChatState.CONTRATAR_MENU,
+      responses: this.contractFlow.getContractMenu(),
+    };
+  }
+
+  private async handleContractForm(message: string): Promise<StateMachineResult> {
+    const result = await this.contractFlow.handlePreCadastroSubmission(message);
+    return {
+      nextState: result.nextState,
+      responses: [
+        ...result.responses,
+        ...(result.nextState === ChatState.MENU_PRINCIPAL
+          ? this.mainMenu()
+          : []),
+      ],
+    };
   }
 
   private mainMenu(): ChatResponse[] {

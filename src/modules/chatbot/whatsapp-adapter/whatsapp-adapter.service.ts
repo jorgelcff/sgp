@@ -7,6 +7,7 @@ import { ChatResponse } from "../state-machine/state-machine.types";
 @Injectable()
 export class WhatsappAdapterService {
   private readonly logger = new Logger(WhatsappAdapterService.name);
+  private globalQueue = Promise.resolve();
 
   constructor(
     @Inject(WHATSAPP_GATEWAY)
@@ -19,14 +20,21 @@ export class WhatsappAdapterService {
     responses: ChatResponse[],
   ): Promise<void> {
     const target = this.resolveTargetPhone(telefone);
-    for (const response of responses) {
-      await this.sendWithRetry(target, response);
-      await this.delayBetweenMessages();
-    }
+    const task = async () => {
+      for (const response of responses) {
+        await this.sendWithRetry(target, response);
+        await this.delayBetweenMessages();
+      }
 
-    this.logger.log(
-      `Respostas enviadas para ${target}. Total: ${responses.length}.`,
-    );
+      this.logger.log(
+        `Respostas enviadas para ${target}. Total: ${responses.length}.`,
+      );
+    };
+
+    const current = this.globalQueue.then(task);
+    // Keep the queue alive even if this task throws; still propagate to caller.
+    this.globalQueue = current.catch(() => undefined);
+    await current;
   }
 
   private resolveTargetPhone(original: string): string {
@@ -40,7 +48,7 @@ export class WhatsappAdapterService {
 
   private async delayBetweenMessages(): Promise<void> {
     const ms =
-      this.configService.get<number>("WHATSAPP_MESSAGE_DELAY_MS") ?? 800;
+      this.configService.get<number>("WHATSAPP_MESSAGE_DELAY_MS") ?? 5000;
     if (ms <= 0) {
       return;
     }
@@ -59,6 +67,8 @@ export class WhatsappAdapterService {
       this.configService.get<number>("WHATSAPP_RETRY_MULTIPLIER") ?? 2;
     const maxDelay =
       this.configService.get<number>("WHATSAPP_RETRY_MAX_MS") ?? 8000;
+    const minInterval =
+      this.configService.get<number>("WHATSAPP_MIN_INTERVAL_MS") ?? 5000;
 
     let attempt = 0;
     while (attempt < maxAttempts) {
@@ -84,7 +94,10 @@ export class WhatsappAdapterService {
           baseDelay * Math.pow(multiplier, attempt - 1),
           maxDelay,
         );
-        const delay = is429 ? scaled : Math.min(baseDelay / 2, scaled);
+        const delay = Math.max(
+          minInterval,
+          is429 ? scaled : Math.min(baseDelay / 2, scaled),
+        );
         const detail = this.buildErrorDetail(error);
         this.logger.warn(
           `Tentativa ${attempt}/${maxAttempts} falhou para ${target} (status=${status ?? "unknown"}${detail ? ", " + detail : ""}).`,
