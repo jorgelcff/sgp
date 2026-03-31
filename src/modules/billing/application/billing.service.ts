@@ -3,8 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../../database/prisma.service";
 import { ClientesService } from "../../clientes/application/clientes.service";
 import { NotificacoesService } from "../../notificacoes/application/notificacoes.service";
-import { WhatsappGateway } from "../../whatsapp/domain/whatsapp.gateway";
-import { WHATSAPP_GATEWAY } from "../../whatsapp/domain/whatsapp.tokens";
+import { WhatsappQueueService } from "../../whatsapp/infrastructure/whatsapp-queue.service";
 
 @Injectable()
 export class BillingService {
@@ -14,8 +13,7 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly clientesService: ClientesService,
     private readonly notificacoesService: NotificacoesService,
-    @Inject(WHATSAPP_GATEWAY)
-    private readonly whatsappService: WhatsappGateway,
+    private readonly whatsappQueue: WhatsappQueueService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -111,22 +109,14 @@ export class BillingService {
       });
 
       try {
-        await this.whatsappService.sendText(celular, messages.main);
-        if (messages.pix) {
-          await this.whatsappService.sendText(celular, messages.pix);
-        }
-        if (messages.linhaDigitavel) {
-          await this.whatsappService.sendText(celular, messages.linhaDigitavel);
-        }
-        if (messages.codigoBarras) {
-          await this.whatsappService.sendText(celular, messages.codigoBarras);
-        }
-        if (messages.linkBoleto) {
-          await this.whatsappService.sendText(celular, messages.linkBoleto);
-        }
-        if (messages.boleto) {
-          await this.whatsappService.sendText(celular, messages.boleto);
-        }
+        await this.whatsappQueue.sendTexts(celular, [
+          messages.main,
+          messages.pix ?? "",
+          messages.linhaDigitavel ?? "",
+          messages.codigoBarras ?? "",
+          messages.linkBoleto ?? "",
+          messages.boleto ?? "",
+        ]);
         await this.notificacoesService.registerSent({
           tituloId: titulo.id,
           clienteId: titulo.clienteId,

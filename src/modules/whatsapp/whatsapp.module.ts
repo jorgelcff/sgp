@@ -5,6 +5,7 @@ import { WhatsappService } from "./infrastructure/whatsapp.service";
 import { WasenderService } from "./infrastructure/wasender.service";
 import { WHATSAPP_GATEWAY } from "./domain/whatsapp.tokens";
 import { WhatsappController } from "./whatsapp.controller";
+import { WhatsappQueueService } from "./infrastructure/whatsapp-queue.service";
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { WhatsappController } from "./whatsapp.controller";
   providers: [
     WhatsappService,
     WasenderService,
+    WhatsappQueueService,
     {
       provide: WHATSAPP_GATEWAY,
       useFactory: (
@@ -50,6 +52,6 @@ import { WhatsappController } from "./whatsapp.controller";
       inject: [ConfigService, WasenderService, WhatsappService],
     },
   ],
-  exports: [WHATSAPP_GATEWAY],
+  exports: [WHATSAPP_GATEWAY, WhatsappQueueService],
 })
 export class WhatsappModule {}
