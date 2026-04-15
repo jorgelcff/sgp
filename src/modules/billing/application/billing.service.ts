@@ -111,11 +111,13 @@ export class BillingService {
       try {
         await this.whatsappQueue.sendTexts(celular, [
           messages.main,
-          messages.pix ?? "",
-          messages.linhaDigitavel ?? "",
-          messages.codigoBarras ?? "",
+          messages.pixLabel ?? "",
+          messages.pixCodigo ?? "",
+          messages.linhaDigitavelLabel ?? "",
+          messages.linhaDigitavelCodigo ?? "",
+          messages.codigoBarrasLabel ?? "",
+          messages.codigoBarrasCodigo ?? "",
           messages.linkBoleto ?? "",
-          messages.boleto ?? "",
         ]);
         await this.notificacoesService.registerSent({
           tituloId: titulo.id,
@@ -124,11 +126,13 @@ export class BillingService {
           referenciaData: referenceDate,
           mensagem: [
             messages.main,
-            messages.pix,
-            messages.linhaDigitavel,
-            messages.codigoBarras,
+            messages.pixLabel,
+            messages.pixCodigo,
+            messages.linhaDigitavelLabel,
+            messages.linhaDigitavelCodigo,
+            messages.codigoBarrasLabel,
+            messages.codigoBarrasCodigo,
             messages.linkBoleto,
-            messages.boleto,
           ]
             .filter(Boolean)
             .join("\n\n"),
@@ -149,11 +153,13 @@ export class BillingService {
           referenciaData: referenceDate,
           mensagem: [
             messages.main,
-            messages.pix,
-            messages.linhaDigitavel,
-            messages.codigoBarras,
+            messages.pixLabel,
+            messages.pixCodigo,
+            messages.linhaDigitavelLabel,
+            messages.linhaDigitavelCodigo,
+            messages.codigoBarrasLabel,
+            messages.codigoBarrasCodigo,
             messages.linkBoleto,
-            messages.boleto,
           ]
             .filter(Boolean)
             .join("\n\n"),
@@ -186,11 +192,13 @@ function buildMessageParts(params: {
   link: string;
 }): {
   main: string;
-  pix: string | null;
-  linhaDigitavel: string | null;
-  codigoBarras: string | null;
+  pixLabel: string | null;
+  pixCodigo: string | null;
+  linhaDigitavelLabel: string | null;
+  linhaDigitavelCodigo: string | null;
+  codigoBarrasLabel: string | null;
+  codigoBarrasCodigo: string | null;
   linkBoleto: string | null;
-  boleto: string | null;
 } {
   const dataVencimento = params.dataVencimento
     ? formatDate(params.dataVencimento)
@@ -206,30 +214,23 @@ function buildMessageParts(params: {
       : `vence em ${pluralizeDay(params.diasParaVencer)}`;
 
   const linhaDigitavel = params.linhaDigitavel.trim();
-  const boletoLine = linhaDigitavel ? linhaDigitavel : "nao informado";
   const codigoBarras = params.codigoBarras.trim();
-  const barras = codigoBarras ? codigoBarras : "nao informado";
+  const codigoPix = params.codigoPix.trim();
   const link = params.link.trim();
 
   const main =
     `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
     `Valor atualizado: ${valor}`;
 
-  const pix = params.codigoPix.trim()
-    ? `Pix copia e cola:\n${params.codigoPix.trim()}`
-    : null;
-
-  const boleto = "Boleto:";
-
   return {
     main,
-    pix,
-    linhaDigitavel: linhaDigitavel
-      ? `Linha digitavel:\n${linhaDigitavel}`
-      : null,
-    codigoBarras: codigoBarras ? `Codigo de barras:\n${codigoBarras}` : null,
+    pixLabel: codigoPix ? `Pix copia e cola:` : null,
+    pixCodigo: codigoPix ? codigoPix : null,
+    linhaDigitavelLabel: linhaDigitavel ? `Linha digitavel:` : null,
+    linhaDigitavelCodigo: linhaDigitavel ? linhaDigitavel : null,
+    codigoBarrasLabel: codigoBarras ? `Codigo de barras:` : null,
+    codigoBarrasCodigo: codigoBarras ? codigoBarras : null,
     linkBoleto: link ? `Link do boleto:\n${link}` : null,
-    boleto,
   };
 }
 
