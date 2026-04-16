@@ -43,6 +43,9 @@ export class BillingService {
         cliente: {
           select: { nome: true },
         },
+        contrato: {
+          select: { id: true, status: true },
+        },
       },
     });
 
@@ -63,6 +66,14 @@ export class BillingService {
         );
         break;
       }
+
+      if (!isContractChargeable(titulo.contrato?.status)) {
+        this.logger.log(
+          `Titulo ${titulo.id} ignorado: contrato ${titulo.contratoId ?? "sem id"} com status nao elegivel (${titulo.contrato?.status ?? "nao informado"}).`,
+        );
+        continue;
+      }
+
       const vencimento = titulo.dataVencimento
         ? startOfDay(titulo.dataVencimento)
         : null;
@@ -318,4 +329,33 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function isContractChargeable(contractStatus?: string | null): boolean {
+  const normalized = normalizeStatus(contractStatus);
+  if (!normalized) {
+    return false;
+  }
+
+  const blockedPatterns = [
+    "cancel",
+    "inativ",
+    "bloque",
+    "suspens",
+    "desabil",
+  ];
+  if (blockedPatterns.some((pattern) => normalized.includes(pattern))) {
+    return false;
+  }
+
+  const allowedPatterns = ["ativo", "habilit", "liber"];
+  return allowedPatterns.some((pattern) => normalized.includes(pattern));
+}
+
+function normalizeStatus(value?: string | null): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }
