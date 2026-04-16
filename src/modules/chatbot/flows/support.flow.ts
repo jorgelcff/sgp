@@ -1,12 +1,18 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../../database/prisma.service";
+import { WhatsappQueueService } from "../../whatsapp/infrastructure/whatsapp-queue.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
 export class SupportFlowService {
   private readonly logger = new Logger(SupportFlowService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly whatsappQueue: WhatsappQueueService,
+    private readonly configService: ConfigService,
+  ) {}
 
   getSupportMenu(): ChatResponse[] {
     return [
@@ -86,6 +92,20 @@ export class SupportFlowService {
     this.logger.log(
       `Ordem de servico registrada para cliente ${cliente.id} CPF ${cpf}. Protocolo ${protocolo}.`,
     );
+
+    const notifyPhone = this.configService.get<string>("SUPPORT_NOTIFY_PHONE");
+    if (notifyPhone) {
+      const notifyMsg =
+        `Novo chamado aberto!\n` +
+        `Protocolo: ${protocolo}\n` +
+        `Cliente: ${cliente.nome ?? "nao informado"}\n` +
+        `CPF: ${cpf}`;
+      this.whatsappQueue.sendText(notifyPhone, notifyMsg).catch((err) => {
+        this.logger.warn(
+          `Falha ao notificar SUPPORT_NOTIFY_PHONE: ${err?.message ?? err}`,
+        );
+      });
+    }
 
     return {
       responses: [

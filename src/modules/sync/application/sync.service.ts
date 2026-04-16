@@ -338,10 +338,6 @@ async function upsertContatos(
     valor: value.valor,
   }));
 
-  if (data.length === 0) {
-    return;
-  }
-
   const unique = new Map<
     string,
     { clienteId: number; tipo: string; valor: string }
@@ -350,7 +346,24 @@ async function upsertContatos(
     unique.set(`${item.tipo}:${item.valor}`, item);
   }
 
-  for (const item of unique.values()) {
+  const incoming = Array.from(unique.values());
+
+  // Remove contacts that no longer exist in SGP so the bot never
+  // reaches phone numbers that were deleted from the customer record.
+  if (incoming.length > 0) {
+    await tx.contato.deleteMany({
+      where: {
+        clienteId,
+        NOT: {
+          OR: incoming.map((i) => ({ tipo: i.tipo, valor: i.valor })),
+        },
+      },
+    });
+  } else {
+    await tx.contato.deleteMany({ where: { clienteId } });
+  }
+
+  for (const item of incoming) {
     await tx.contato.upsert({
       where: {
         clienteId_tipo_valor: {

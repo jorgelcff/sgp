@@ -122,17 +122,32 @@ export class FinanceFlowService {
         type: "text",
         text:
           `Segunda via encontrada. Vencimento: ${vencimento}\n` +
-          `Valor: ${valor}`,
-      },
-      {
-        type: "text",
-        text: `Pix copia e cola:\n${titulo.codigoPix ?? "nao informado"}`,
-      },
-      {
-        type: "text",
-        text: `Codigo de barras:\n${titulo.codigoBarras ?? "nao informado"}`,
+          `Valor: ${valor}\n\n` +
+          `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
+          `https://telecomfibra.sgp.net.br/accounts/central/login`,
       },
     ];
+
+    if (titulo.codigoPix) {
+      responses.push(
+        { type: "text", text: `Pix copia e cola:` },
+        { type: "text", text: titulo.codigoPix },
+      );
+    }
+
+    if (titulo.linhaDigitavel) {
+      responses.push(
+        { type: "text", text: `Linha digitavel:` },
+        { type: "text", text: titulo.linhaDigitavel },
+      );
+    }
+
+    if (titulo.codigoBarras) {
+      responses.push(
+        { type: "text", text: `Codigo de barras:` },
+        { type: "text", text: titulo.codigoBarras },
+      );
+    }
 
     if (titulo.link) {
       responses.push({
