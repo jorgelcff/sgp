@@ -220,7 +220,9 @@ function buildMessageParts(params: {
 
   const main =
     `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
-    `Valor atualizado: ${valor}`;
+    `Valor atualizado: ${valor}\n\n` +
+    `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
+    `https://telecomfibra.sgp.net.br/accounts/central/login`;
 
   return {
     main,

@@ -122,7 +122,9 @@ export class FinanceFlowService {
         type: "text",
         text:
           `Segunda via encontrada. Vencimento: ${vencimento}\n` +
-          `Valor: ${valor}`,
+          `Valor: ${valor}\n\n` +
+          `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
+          `https://telecomfibra.sgp.net.br/accounts/central/login`,
       },
     ];
 
