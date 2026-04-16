@@ -98,8 +98,14 @@ export class PaymentFlowService {
         },
       });
 
+      const formatted = formatCpf(cpf);
+      const searchFilters = [
+        { cpfCnpj: { contains: cpf } },
+        ...(formatted ? [{ cpfCnpj: { contains: formatted } }] : []),
+      ];
+
       const cliente = await this.prisma.cliente.findFirst({
-        where: { cpfCnpj: { contains: cpf } },
+        where: { OR: searchFilters },
       });
 
       if (cliente) {
@@ -137,4 +143,11 @@ function normalizeCpf(value: string): string | null {
   }
 
   return digits;
+}
+
+function formatCpf(digits: string): string | null {
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  }
+  return null;
 }
