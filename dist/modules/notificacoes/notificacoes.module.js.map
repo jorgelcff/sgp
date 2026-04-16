@@ -1,1 +1,0 @@
-{"version":3,"file":"notificacoes.module.js","sourceRoot":"","sources":["../../../src/modules/notificacoes/notificacoes.module.ts"],"names":[],"mappings":";;;;;;;;;AAAA,2CAAwC;AACxC,6EAAyE;AAMlE,IAAM,kBAAkB,GAAxB,MAAM,kBAAkB;CAAG,CAAA;AAArB,gDAAkB;6BAAlB,kBAAkB;IAJ9B,IAAA,eAAM,EAAC;QACN,SAAS,EAAE,CAAC,0CAAmB,CAAC;QAChC,OAAO,EAAE,CAAC,0CAAmB,CAAC;KAC/B,CAAC;GACW,kBAAkB,CAAG"}
