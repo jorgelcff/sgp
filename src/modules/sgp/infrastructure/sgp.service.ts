@@ -1,7 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { firstValueFrom } from "rxjs";
-import { SgpClientesResponse } from "../domain/sgp.types";
+import {
+  SgpChamadoPayload,
+  SgpChamadoResponse,
+  SgpClientesResponse,
+} from "../domain/sgp.types";
 
 @Injectable()
 export class SgpService {
@@ -34,6 +38,18 @@ export class SgpService {
       return true;
     }
     return false;
+  }
+
+  async createChamado(payload: SgpChamadoPayload): Promise<SgpChamadoResponse> {
+    const response = await firstValueFrom(
+      this.httpService.post<SgpChamadoResponse>("/chamado/", payload),
+    );
+
+    this.logger.log(
+      `Chamado SGP criado para contrato ${payload.contrato}. Status=${response.data?.status}. Protocolo=${response.data?.protocolo}.`,
+    );
+
+    return response.data;
   }
 
   async ping(): Promise<boolean> {

@@ -23,6 +23,8 @@ export class WebhookController {
         mensagem: raw.mensagem ?? "",
         tipo: raw.tipo ?? "text",
         mediaUrl: raw.mediaUrl ?? null,
+        fromMe: Boolean(raw.fromMe),
+        messageId: raw.messageId ?? null,
       };
     }
 
@@ -33,11 +35,17 @@ export class WebhookController {
       throw new BadRequestException("Formato de webhook invalido.");
     }
 
-    const telefone =
-      message.cleanedSenderPn ??
-      message.senderPn ??
-      message.key?.cleanedSenderPn ??
-      extractJid(message.key?.remoteJid);
+    const fromMe = Boolean(message.key?.fromMe);
+
+    // Para mensagens enviadas pelo proprio numero (bot ou atendente humano),
+    // o remetente "real" e o numero do bot; quem importa e o destinatario
+    // da conversa, que fica em key.remoteJid.
+    const telefone = fromMe
+      ? extractJid(message.key?.remoteJid)
+      : message.cleanedSenderPn ??
+        message.senderPn ??
+        message.key?.cleanedSenderPn ??
+        extractJid(message.key?.remoteJid);
 
     if (!telefone) {
       throw new BadRequestException("Telefone ausente no webhook.");
@@ -55,6 +63,8 @@ export class WebhookController {
       mensagem,
       tipo,
       mediaUrl,
+      fromMe,
+      messageId: message.key?.id ?? null,
     };
   }
 }

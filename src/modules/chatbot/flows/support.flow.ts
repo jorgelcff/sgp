@@ -1,7 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Contrato } from "@prisma/client";
 import { PrismaService } from "../../../database/prisma.service";
 import { WhatsappQueueService } from "../../whatsapp/infrastructure/whatsapp-queue.service";
+import { SgpService } from "../../sgp/infrastructure/sgp.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
@@ -12,6 +14,7 @@ export class SupportFlowService {
     private readonly prisma: PrismaService,
     private readonly whatsappQueue: WhatsappQueueService,
     private readonly configService: ConfigService,
+    private readonly sgpService: SgpService,
   ) {}
 
   getSupportMenu(): ChatResponse[] {
@@ -44,6 +47,7 @@ export class SupportFlowService {
 
   async handleSupportCpf(
     cpfInput: string,
+    telefone: string,
   ): Promise<{ responses: ChatResponse[]; nextState: ChatState }> {
     const cpf = normalizeCpf(cpfInput);
     if (!cpf) {
@@ -73,6 +77,7 @@ export class SupportFlowService {
 
     const cliente = await this.prisma.cliente.findFirst({
       where: { OR: searchFilters },
+      include: { contratos: true },
     });
 
     if (!cliente) {
@@ -94,7 +99,7 @@ export class SupportFlowService {
       };
     }
 
-    const protocolo = `OS-${Date.now()}`;
+    const protocolo = await this.abrirChamado(cliente.id, cliente.nome, cliente.contratos, telefone, cpf);
     this.logger.log(
       `Ordem de servico registrada para cliente ${cliente.id} CPF ${cpf}. Protocolo ${protocolo}.`,
     );
@@ -125,6 +130,102 @@ export class SupportFlowService {
       nextState: ChatState.MENU_PRINCIPAL,
     };
   }
+
+  private async abrirChamado(
+    clienteId: number,
+    clienteNome: string,
+    contratos: Contrato[],
+    telefone: string,
+    cpf: string,
+  ): Promise<string> {
+    const fallbackProtocolo = `OS-${Date.now()}`;
+
+    const app = this.configService.get<string>("SGP_APP");
+    const token = this.configService.get<string>("SGP_TOKEN");
+    if (!app || !token) {
+      this.logger.warn(
+        "SGP_APP/SGP_TOKEN nao configurados. Chamado registrado apenas localmente.",
+      );
+      return fallbackProtocolo;
+    }
+
+    const contrato = pickContratoAtivo(contratos);
+    if (!contrato) {
+      this.logger.warn(
+        `Cliente ${clienteId} sem contrato ativo. Chamado registrado apenas localmente.`,
+      );
+      return fallbackProtocolo;
+    }
+
+    const ocorrenciaTipo = this.configService.get<string>("SGP_CHAMADO_OCORRENCIA_TIPO");
+    const setor = this.configService.get<string>("SGP_CHAMADO_SETOR");
+    const motivoOs = this.configService.get<string>("SGP_CHAMADO_MOTIVOOS");
+
+    try {
+      const resposta = await this.sgpService.createChamado({
+        app,
+        token,
+        contrato: contrato.id,
+        ...(ocorrenciaTipo ? { ocorrenciatipo: Number(ocorrenciaTipo) } : {}),
+        ...(setor ? { setor: Number(setor) } : {}),
+        ...(motivoOs ? { motivoos: Number(motivoOs) } : {}),
+        conteudo: `Chamado aberto via WhatsApp (Suporte - Internet lenta).\nCliente: ${clienteNome}\nCPF/CNPJ: ${cpf}`,
+        contato_nome: clienteNome,
+        contato_telefone: telefone,
+        notificar_cliente: 1,
+      });
+
+      if (resposta?.protocolo) {
+        return resposta.protocolo;
+      }
+
+      this.logger.warn(
+        `SGP nao retornou protocolo para o contrato ${contrato.id}. Resposta: ${JSON.stringify(resposta)}.`,
+      );
+      return fallbackProtocolo;
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao abrir chamado no SGP para o contrato ${contrato.id}: ${getErrorMessage(error)}`,
+      );
+      return fallbackProtocolo;
+    }
+  }
+}
+
+function pickContratoAtivo(contratos: Contrato[]): Contrato | null {
+  const ativo = contratos.find((contrato) => isContratoAtivo(contrato.status));
+  return ativo ?? contratos[0] ?? null;
+}
+
+function isContratoAtivo(status?: string | null): boolean {
+  const normalized = normalizeStatus(status);
+  if (!normalized) {
+    return false;
+  }
+
+  const blockedPatterns = ["cancel", "inativ", "bloque", "suspens", "desabil"];
+  if (blockedPatterns.some((pattern) => normalized.includes(pattern))) {
+    return false;
+  }
+
+  const allowedPatterns = ["ativo", "habilit", "liber"];
+  return allowedPatterns.some((pattern) => normalized.includes(pattern));
+}
+
+function normalizeStatus(value?: string | null): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 function normalizeCpf(value: string): string | null {

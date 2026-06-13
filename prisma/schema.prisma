@@ -156,12 +156,13 @@ model Notificacao {
 }
 
 model Session {
-  id           String   @id @default(uuid())
-  telefone     String   @unique
-  estado       String
-  contexto     String?
-  criadoEm     DateTime @default(now())
-  atualizadoEm DateTime @updatedAt
+  id                String    @id @default(uuid())
+  telefone          String    @unique
+  estado            String
+  contexto          String?
+  atendimentoHumanoEm DateTime?
+  criadoEm          DateTime  @default(now())
+  atualizadoEm      DateTime  @updatedAt
 }
 
 model MediaLog {

@@ -1,7 +1,12 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Cron } from "@nestjs/schedule";
 import { PrismaService } from "../../../database/prisma.service";
 import { WhatsappAdapterService } from "../whatsapp-adapter/whatsapp-adapter.service";
+import {
+  getHumanHandoffThresholdMs,
+  isHumanHandoffActive,
+} from "./human-handoff.util";
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const WARNING_AFTER_MS = 30 * 60 * 1000;
@@ -14,6 +19,7 @@ export class SessionCron {
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsappAdapter: WhatsappAdapterService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Cron("*/1 * * * *")
@@ -45,7 +51,13 @@ export class SessionCron {
       },
     });
 
+    const handoffThreshold = getHumanHandoffThresholdMs(this.configService);
+
     for (const session of sessions) {
+      if (isHumanHandoffActive(session.atendimentoHumanoEm, handoffThreshold, now)) {
+        continue;
+      }
+
       const context = parseContext(session.contexto);
       if (context[flag]) {
         continue;

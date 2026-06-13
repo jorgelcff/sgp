@@ -108,3 +108,27 @@ export type SgpClientesResponse = {
   paginacao: SgpPagination;
   clientes: SgpCliente[];
 };
+
+export type SgpChamadoPayload = {
+  app: string;
+  token: string;
+  contrato: number;
+  ocorrenciatipo?: number;
+  setor?: number;
+  motivoos?: number;
+  tipoclassificacoes?: number[];
+  conteudo?: string;
+  observacao?: string;
+  contato_nome?: string;
+  contato_telefone?: string;
+  notificar_cliente?: number;
+};
+
+export type SgpChamadoResponse = {
+  status: number;
+  razaoSocial?: string;
+  protocolo?: string;
+  cpfCnpj?: string;
+  msg?: string;
+  contratoId?: number;
+};

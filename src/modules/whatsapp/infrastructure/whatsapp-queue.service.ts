@@ -2,32 +2,54 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { WhatsappGateway } from "../domain/whatsapp.gateway";
 import { WHATSAPP_GATEWAY } from "../domain/whatsapp.tokens";
+import { OutboundMessageTrackerService } from "./outbound-message-tracker.service";
 
 type TextPayload = { type: "text"; text: string };
 type ImagePayload = { type: "image"; imageUrl: string; caption?: string };
 type Payload = TextPayload | ImagePayload;
 
+export type QueuePriority = "normal" | "low";
+
+type QueueItem = {
+  phone: string;
+  payload: Payload;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
 @Injectable()
 export class WhatsappQueueService {
   private readonly logger = new Logger(WhatsappQueueService.name);
-  private globalQueue = Promise.resolve();
+  private readonly highQueue: QueueItem[] = [];
+  private readonly lowQueue: QueueItem[] = [];
+  private processing = false;
 
   constructor(
     @Inject(WHATSAPP_GATEWAY)
     private readonly whatsappGateway: WhatsappGateway,
     private readonly configService: ConfigService,
+    private readonly outboundTracker: OutboundMessageTrackerService,
   ) {}
 
-  async sendText(phone: string, message: string): Promise<void> {
-    await this.enqueue(phone, { type: "text", text: message });
+  async sendText(
+    phone: string,
+    message: string,
+    priority: QueuePriority = "normal",
+  ): Promise<void> {
+    await this.enqueue(phone, { type: "text", text: message }, priority);
   }
 
-  async sendTexts(phone: string, messages: string[]): Promise<void> {
+  async sendTexts(
+    phone: string,
+    messages: string[],
+    priority: QueuePriority = "normal",
+  ): Promise<void> {
     const filtered = messages.filter((m) => m && m.trim().length > 0);
     if (filtered.length === 0) return;
     await this.enqueueBatch(
       phone,
       filtered.map((m) => ({ type: "text", text: m })),
+      priority,
     );
   }
 
@@ -35,34 +57,82 @@ export class WhatsappQueueService {
     phone: string,
     imageUrl: string,
     caption?: string,
+    priority: QueuePriority = "normal",
   ): Promise<void> {
-    await this.enqueue(phone, { type: "image", imageUrl, caption });
+    await this.enqueue(phone, { type: "image", imageUrl, caption }, priority);
   }
 
-  private enqueue(phone: string, payload: Payload): Promise<void> {
-    const task = async () => {
-      const target = this.resolveTargetPhone(phone);
-      await this.sendWithRetry(target, payload);
-      await this.delayBetweenMessages();
-    };
-
-    const current = this.globalQueue.then(task);
-    this.globalQueue = current.catch(() => undefined);
-    return current;
+  private enqueue(
+    phone: string,
+    payload: Payload,
+    priority: QueuePriority,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.push({ phone, payload, resolve, reject }, priority);
+      this.processQueue();
+    });
   }
 
-  private enqueueBatch(phone: string, payloads: Payload[]): Promise<void> {
-    const task = async () => {
-      const target = this.resolveTargetPhone(phone);
+  private enqueueBatch(
+    phone: string,
+    payloads: Payload[],
+    priority: QueuePriority,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let remaining = payloads.length;
       for (const payload of payloads) {
-        await this.sendWithRetry(target, payload);
-        await this.delayBetweenMessages();
+        this.push(
+          {
+            phone,
+            payload,
+            resolve: () => {
+              remaining -= 1;
+              if (remaining === 0) {
+                resolve();
+              }
+            },
+            reject,
+          },
+          priority,
+        );
       }
-    };
+      this.processQueue();
+    });
+  }
 
-    const current = this.globalQueue.then(task);
-    this.globalQueue = current.catch(() => undefined);
-    return current;
+  private push(item: QueueItem, priority: QueuePriority): void {
+    if (priority === "low") {
+      this.lowQueue.push(item);
+    } else {
+      this.highQueue.push(item);
+    }
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+
+    try {
+      let item = this.nextItem();
+      while (item) {
+        const target = this.resolveTargetPhone(item.phone);
+        try {
+          await this.sendWithRetry(target, item.payload);
+          item.resolve();
+        } catch (error) {
+          item.reject(error);
+        }
+
+        await this.delayBetweenMessages();
+        item = this.nextItem();
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
+
+  private nextItem(): QueueItem | undefined {
+    return this.highQueue.shift() ?? this.lowQueue.shift();
   }
 
   private resolveTargetPhone(original: string): string {
@@ -96,15 +166,17 @@ export class WhatsappQueueService {
     while (attempt < maxAttempts) {
       attempt += 1;
       try {
+        let messageId: string | null;
         if (payload.type === "text") {
-          await this.whatsappGateway.sendText(target, payload.text);
+          messageId = await this.whatsappGateway.sendText(target, payload.text);
         } else {
-          await this.whatsappGateway.sendImage(
+          messageId = await this.whatsappGateway.sendImage(
             target,
             payload.imageUrl,
             payload.caption,
           );
         }
+        this.outboundTracker.track(target, messageId);
         return;
       } catch (error) {
         const status = (error as any)?.response?.status;

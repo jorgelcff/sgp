@@ -27,4 +27,6 @@ export type WebhookPayload = {
   mensagem?: string;
   tipo: "text" | "image" | "document";
   mediaUrl?: string | null;
+  fromMe?: boolean;
+  messageId?: string | null;
 };

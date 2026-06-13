@@ -68,6 +68,20 @@ export class SessionService {
       orderBy: { atualizadoEm: "desc" },
     });
   }
+
+  async markHumanHandoff(sessionId: string): Promise<Session> {
+    return this.prisma.session.update({
+      where: { id: sessionId },
+      data: { atendimentoHumanoEm: new Date() },
+    });
+  }
+
+  async clearHumanHandoff(sessionId: string): Promise<Session> {
+    return this.prisma.session.update({
+      where: { id: sessionId },
+      data: { atendimentoHumanoEm: null },
+    });
+  }
 }
 
 function serializeContext(context: Record<string, unknown>): string {

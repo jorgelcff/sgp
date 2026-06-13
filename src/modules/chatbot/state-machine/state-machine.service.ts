@@ -79,7 +79,7 @@ export class StateMachineService {
       case ChatState.SUPORTE_LENTO_REINICIAR:
         return this.handleSupportLento(message);
       case ChatState.SUPORTE_PEDIR_CPF:
-        return this.handleSupportCpf(message);
+        return this.handleSupportCpf(message, params.payload.telefone);
       case ChatState.FINANCEIRO_MENU:
         return this.handleFinanceMenu(message);
       case ChatState.FINANCEIRO_PEDIR_CPF:
@@ -183,8 +183,11 @@ export class StateMachineService {
     };
   }
 
-  private async handleSupportCpf(message: string): Promise<StateMachineResult> {
-    const result = await this.supportFlow.handleSupportCpf(message);
+  private async handleSupportCpf(
+    message: string,
+    telefone: string,
+  ): Promise<StateMachineResult> {
+    const result = await this.supportFlow.handleSupportCpf(message, telefone);
     return {
       nextState: result.nextState,
       responses: [

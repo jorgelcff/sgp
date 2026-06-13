@@ -22,7 +22,7 @@ export class WhatsappService implements WhatsappGateway {
     | { type: "image"; phone: string; imageUrl: string; caption?: string }
   > = [];
 
-  async sendText(phone: string, message: string): Promise<void> {
+  async sendText(phone: string, message: string): Promise<string | null> {
     await this.connect();
 
     if (!this.socket) {
@@ -32,18 +32,19 @@ export class WhatsappService implements WhatsappGateway {
     if (!this.socket.user?.id) {
       this.queueMessage({ type: "text", phone, message });
       this.logger.warn("WhatsApp ainda nao autenticado. Mensagem enfileirada.");
-      return;
+      return null;
     }
 
     const jid = `${normalizePhone(phone)}@s.whatsapp.net`;
-    await this.socket.sendMessage(jid, { text: message });
+    const sent = await this.socket.sendMessage(jid, { text: message });
+    return sent?.key?.id ?? null;
   }
 
   async sendImage(
     phone: string,
     imageUrl: string,
     caption?: string,
-  ): Promise<void> {
+  ): Promise<string | null> {
     await this.connect();
 
     if (!this.socket) {
@@ -53,14 +54,15 @@ export class WhatsappService implements WhatsappGateway {
     if (!this.socket.user?.id) {
       this.queueMessage({ type: "image", phone, imageUrl, caption });
       this.logger.warn("WhatsApp ainda nao autenticado. Imagem enfileirada.");
-      return;
+      return null;
     }
 
     const jid = `${normalizePhone(phone)}@s.whatsapp.net`;
-    await this.socket.sendMessage(jid, {
+    const sent = await this.socket.sendMessage(jid, {
       image: { url: imageUrl },
       caption,
     });
+    return sent?.key?.id ?? null;
   }
 
   private async connect(): Promise<void> {

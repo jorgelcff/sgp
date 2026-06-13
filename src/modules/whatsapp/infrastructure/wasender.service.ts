@@ -13,8 +13,8 @@ export class WasenderService implements WhatsappGateway {
     private readonly configService: ConfigService,
   ) {}
 
-  async sendText(phone: string, message: string): Promise<void> {
-    await this.post(this.getTextPath(), {
+  async sendText(phone: string, message: string): Promise<string | null> {
+    return this.post(this.getTextPath(), {
       to: formatPhone(phone),
       text: message,
     });
@@ -24,7 +24,7 @@ export class WasenderService implements WhatsappGateway {
     phone: string,
     imageUrl: string,
     caption?: string,
-  ): Promise<void> {
+  ): Promise<string | null> {
     // Wasender docs: image is sent via send-message with imageUrl and optional text.
     const payload: Record<string, unknown> = {
       to: formatPhone(phone),
@@ -35,10 +35,13 @@ export class WasenderService implements WhatsappGateway {
       payload.text = caption;
     }
 
-    await this.post(this.getTextPath(), payload);
+    return this.post(this.getTextPath(), payload);
   }
 
-  private async post(path: string, payload: Record<string, unknown>): Promise<void> {
+  private async post(
+    path: string,
+    payload: Record<string, unknown>,
+  ): Promise<string | null> {
     const url = buildUrl(this.getBaseUrl(), path);
     const token = this.configService.get<string>("WASENDER_TOKEN");
     if (!token) {
@@ -55,6 +58,7 @@ export class WasenderService implements WhatsappGateway {
     );
 
     this.logger.log(`Wasender enviado. Status=${response.status}.`);
+    return extractMessageId(response.data);
   }
 
   private getBaseUrl(): string {
@@ -83,4 +87,16 @@ function buildUrl(baseUrl: string, path: string): string {
   const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   const cleanPath = path.startsWith("/") ? path.slice(1) : path;
   return `${base}/${cleanPath}`;
+}
+
+function extractMessageId(data: unknown): string | null {
+  const root = data as Record<string, any> | undefined;
+  const id =
+    root?.data?.msgId ??
+    root?.data?.key?.id ??
+    root?.data?.message?.key?.id ??
+    root?.msgId ??
+    root?.key?.id;
+
+  return typeof id === "string" ? id : null;
 }

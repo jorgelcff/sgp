@@ -17,11 +17,18 @@ export class BillingService {
     private readonly configService: ConfigService,
   ) {}
 
-  async runBilling(): Promise<void> {
+  async runBilling(force = false): Promise<void> {
     const startedAt = Date.now();
     this.logger.log(
       `Iniciando rotina de cobranca. ${new Date().toISOString()}`,
     );
+
+    if (!force && !isWithinBusinessHours(this.configService)) {
+      this.logger.log(
+        "Fora do horario configurado para cobranca. Execucao pulada.",
+      );
+      return;
+    }
 
     const today = startOfDay(new Date());
     const windowEnd = addDays(today, 5);
@@ -30,6 +37,8 @@ export class BillingService {
       getNumberEnv(this.configService, "BILLING_OVERDUE_DAYS", 30),
     );
     const overdueStart = addDays(today, -overdueDays);
+
+    await this.logStaleTitulos(overdueStart);
 
     const titulos = await this.prisma.titulo.findMany({
       where: {
@@ -47,26 +56,20 @@ export class BillingService {
           select: { id: true, status: true },
         },
       },
+      orderBy: { dataVencimento: "asc" },
     });
 
     this.logger.log(`Titulos em aberto encontrados: ${titulos.length}.`);
 
-    const maxPerRun = getNumberEnv(
-      this.configService,
-      "BILLING_MAX_PER_RUN",
-      50,
-    );
-    const delayMs = getNumberEnv(this.configService, "BILLING_DELAY_MS", 1500);
-    let sentCount = 0;
+    type Eligivel = {
+      titulo: (typeof titulos)[number];
+      schedule: { category: string };
+      daysDiff: number;
+    };
+
+    const elegiveis: Eligivel[] = [];
 
     for (const titulo of titulos) {
-      if (sentCount >= maxPerRun) {
-        this.logger.warn(
-          `Limite de envios por execucao atingido (${maxPerRun}).`,
-        );
-        break;
-      }
-
       if (!isContractChargeable(titulo.contrato?.status)) {
         this.logger.log(
           `Titulo ${titulo.id} ignorado: contrato ${titulo.contratoId ?? "sem id"} com status nao elegivel (${titulo.contrato?.status ?? "nao informado"}).`,
@@ -87,40 +90,87 @@ export class BillingService {
         continue;
       }
 
-      const referenceDate = today;
       const alreadyNotified = await this.notificacoesService.existsForSchedule({
         tituloId: titulo.id,
         categoria: schedule.category,
-        referenciaData: referenceDate,
+        referenciaData: today,
       });
       if (alreadyNotified) {
         continue;
       }
 
-      const celular = await this.clientesService.getPrimaryMobile(
-        titulo.clienteId,
-      );
-      if (!celular) {
+      elegiveis.push({ titulo, schedule, daysDiff });
+    }
+
+    // Agrupa por cliente preservando a ordem de prioridade (vencimento mais antigo primeiro).
+    const grupos = new Map<number, Eligivel[]>();
+    const ordemClientes: number[] = [];
+    for (const item of elegiveis) {
+      const clienteId = item.titulo.clienteId;
+      if (!grupos.has(clienteId)) {
+        grupos.set(clienteId, []);
+        ordemClientes.push(clienteId);
+      }
+      grupos.get(clienteId)!.push(item);
+    }
+
+    const maxPerRun = getNumberEnv(
+      this.configService,
+      "BILLING_MAX_PER_RUN",
+      50,
+    );
+    const delayMs = getNumberEnv(this.configService, "BILLING_DELAY_MS", 1500);
+    let sentCount = 0;
+    const referenceDate = today;
+
+    for (const clienteId of ordemClientes) {
+      if (sentCount >= maxPerRun) {
         this.logger.warn(
-          `Cliente ${titulo.clienteId} sem celular para titulo ${titulo.id}.`,
+          `Limite de envios por execucao atingido (${maxPerRun}).`,
         );
+        break;
+      }
+
+      const itens = grupos.get(clienteId)!;
+      const celular = await this.clientesService.getPrimaryMobile(clienteId);
+      if (!celular) {
+        for (const item of itens) {
+          this.logger.warn(
+            `Cliente ${clienteId} sem celular para titulo ${item.titulo.id}.`,
+          );
+        }
         continue;
       }
 
-      const messages = buildMessageParts({
-        nome: titulo.cliente?.nome ?? "cliente",
-        dataVencimento: titulo.dataVencimento,
-        valorCorrigido: titulo.valorCorrigido ?? titulo.valor ?? 0,
-        diasAtraso: Math.max(0, -daysDiff),
-        diasParaVencer: Math.max(0, daysDiff),
-        codigoPix: titulo.codigoPix ?? "",
-        linhaDigitavel: titulo.linhaDigitavel ?? "",
-        codigoBarras: titulo.codigoBarras ?? "",
-        link: titulo.link ?? "",
-      });
+      const compact = itens.length > 1;
+      const partes: string[] = [];
 
-      try {
-        await this.whatsappQueue.sendTexts(celular, [
+      if (compact) {
+        const nome = toTitleCase(itens[0].titulo.cliente?.nome ?? "cliente");
+        partes.push(
+          `Ola ${nome}, voce tem ${itens.length} boletos pendentes:\n\n` +
+            `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
+            `https://telecomfibra.sgp.net.br/accounts/central/login`,
+        );
+      }
+
+      const mensagensPorItem = itens.map((item) =>
+        buildMessageParts({
+          nome: item.titulo.cliente?.nome ?? "cliente",
+          dataVencimento: item.titulo.dataVencimento,
+          valorCorrigido: item.titulo.valorCorrigido ?? item.titulo.valor ?? 0,
+          diasAtraso: Math.max(0, -item.daysDiff),
+          diasParaVencer: Math.max(0, item.daysDiff),
+          codigoPix: item.titulo.codigoPix ?? "",
+          linhaDigitavel: item.titulo.linhaDigitavel ?? "",
+          codigoBarras: item.titulo.codigoBarras ?? "",
+          link: item.titulo.link ?? "",
+          compact,
+        }),
+      );
+
+      for (const messages of mensagensPorItem) {
+        partes.push(
           messages.main,
           messages.pixLabel ?? "",
           messages.pixCodigo ?? "",
@@ -129,25 +179,33 @@ export class BillingService {
           messages.codigoBarrasLabel ?? "",
           messages.codigoBarrasCodigo ?? "",
           messages.linkBoleto ?? "",
-        ]);
-        await this.notificacoesService.registerSent({
-          tituloId: titulo.id,
-          clienteId: titulo.clienteId,
-          categoria: schedule.category,
-          referenciaData: referenceDate,
-          mensagem: [
-            messages.main,
-            messages.pixLabel,
-            messages.pixCodigo,
-            messages.linhaDigitavelLabel,
-            messages.linhaDigitavelCodigo,
-            messages.codigoBarrasLabel,
-            messages.codigoBarrasCodigo,
-            messages.linkBoleto,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-        });
+        );
+      }
+
+      try {
+        await this.whatsappQueue.sendTexts(celular, partes, "low");
+        for (let i = 0; i < itens.length; i += 1) {
+          const item = itens[i];
+          const messages = mensagensPorItem[i];
+          await this.notificacoesService.registerSent({
+            tituloId: item.titulo.id,
+            clienteId: item.titulo.clienteId,
+            categoria: item.schedule.category,
+            referenciaData: referenceDate,
+            mensagem: [
+              messages.main,
+              messages.pixLabel,
+              messages.pixCodigo,
+              messages.linhaDigitavelLabel,
+              messages.linhaDigitavelCodigo,
+              messages.codigoBarrasLabel,
+              messages.codigoBarrasCodigo,
+              messages.linkBoleto,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          });
+        }
         sentCount += 1;
         if (delayMs > 0) {
           await sleep(delayMs);
@@ -155,27 +213,31 @@ export class BillingService {
       } catch (error) {
         const errorMessage = getErrorMessage(error);
         this.logger.error(
-          `Falha ao enviar WhatsApp para titulo ${titulo.id}: ${errorMessage}`,
+          `Falha ao enviar WhatsApp para cliente ${clienteId}: ${errorMessage}`,
         );
-        await this.notificacoesService.registerFailure({
-          tituloId: titulo.id,
-          clienteId: titulo.clienteId,
-          categoria: schedule.category,
-          referenciaData: referenceDate,
-          mensagem: [
-            messages.main,
-            messages.pixLabel,
-            messages.pixCodigo,
-            messages.linhaDigitavelLabel,
-            messages.linhaDigitavelCodigo,
-            messages.codigoBarrasLabel,
-            messages.codigoBarrasCodigo,
-            messages.linkBoleto,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-          error: errorMessage,
-        });
+        for (let i = 0; i < itens.length; i += 1) {
+          const item = itens[i];
+          const messages = mensagensPorItem[i];
+          await this.notificacoesService.registerFailure({
+            tituloId: item.titulo.id,
+            clienteId: item.titulo.clienteId,
+            categoria: item.schedule.category,
+            referenciaData: referenceDate,
+            mensagem: [
+              messages.main,
+              messages.pixLabel,
+              messages.pixCodigo,
+              messages.linhaDigitavelLabel,
+              messages.linhaDigitavelCodigo,
+              messages.codigoBarrasLabel,
+              messages.codigoBarrasCodigo,
+              messages.linkBoleto,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+            error: errorMessage,
+          });
+        }
 
         if (isRateLimit(errorMessage)) {
           this.logger.warn(
@@ -189,6 +251,21 @@ export class BillingService {
     const durationMs = Date.now() - startedAt;
     this.logger.log(`Rotina de cobranca finalizada. Duracao=${durationMs}ms.`);
   }
+
+  private async logStaleTitulos(overdueStart: Date): Promise<void> {
+    const staleCount = await this.prisma.titulo.count({
+      where: {
+        status: "aberto",
+        dataVencimento: { lt: overdueStart },
+      },
+    });
+
+    if (staleCount > 0) {
+      this.logger.warn(
+        `${staleCount} titulo(s) com status "aberto" e vencimento anterior a ${overdueStart.toISOString().slice(0, 10)} (fora da janela de cobranca). Verifique no SGP se devem ser marcados como pagos/cancelados.`,
+      );
+    }
+  }
 }
 
 function buildMessageParts(params: {
@@ -201,6 +278,7 @@ function buildMessageParts(params: {
   linhaDigitavel: string;
   codigoBarras: string;
   link: string;
+  compact?: boolean;
 }): {
   main: string;
   pixLabel: string | null;
@@ -229,11 +307,13 @@ function buildMessageParts(params: {
   const codigoPix = params.codigoPix.trim();
   const link = params.link.trim();
 
-  const main =
-    `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
-    `Valor atualizado: ${valor}\n\n` +
-    `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
-    `https://telecomfibra.sgp.net.br/accounts/central/login`;
+  const main = params.compact
+    ? `📄 Boleto com vencimento em ${dataVencimento}, ${statusInfo}.\n` +
+      `Valor atualizado: ${valor}`
+    : `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
+      `Valor atualizado: ${valor}\n\n` +
+      `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
+      `https://telecomfibra.sgp.net.br/accounts/central/login`;
 
   return {
     main,
@@ -247,19 +327,37 @@ function buildMessageParts(params: {
   };
 }
 
+const PRE_VENCIMENTO_DIAS = [5, 1, 0];
+const POS_VENCIMENTO_DIAS = [1, 3, 7, 15, 30];
+
 function buildSchedule(
   daysDiff: number,
   overdueDays: number,
 ): { category: string } | null {
-  if (daysDiff >= 0 && daysDiff <= 5) {
-    return { category: "pre-vencimento" };
+  if (daysDiff >= 0) {
+    if (PRE_VENCIMENTO_DIAS.includes(daysDiff)) {
+      return { category: "pre-vencimento" };
+    }
+    return null;
   }
 
-  if (daysDiff < 0 && Math.abs(daysDiff) <= overdueDays) {
+  const diasAtraso = Math.abs(daysDiff);
+  if (diasAtraso > overdueDays) {
+    return null;
+  }
+
+  if (POS_VENCIMENTO_DIAS.includes(diasAtraso) || diasAtraso === overdueDays) {
     return { category: "pos-vencimento" };
   }
 
   return null;
+}
+
+function isWithinBusinessHours(configService: ConfigService): boolean {
+  const startHour = getNumberEnv(configService, "BILLING_HOUR_START", 8);
+  const endHour = getNumberEnv(configService, "BILLING_HOUR_END", 20);
+  const hour = new Date().getHours();
+  return hour >= startHour && hour < endHour;
 }
 
 function startOfDay(date: Date): Date {
@@ -355,7 +453,7 @@ function isContractChargeable(contractStatus?: string | null): boolean {
 function normalizeStatus(value?: string | null): string {
   return (value ?? "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .trim()
     .toLowerCase();
 }

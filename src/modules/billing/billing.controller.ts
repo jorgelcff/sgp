@@ -7,7 +7,7 @@ export class BillingController {
 
   @Get("run")
   async runBilling(): Promise<{ status: string }> {
-    await this.billingService.runBilling();
+    await this.billingService.runBilling(true);
     return { status: "ok" };
   }
 }

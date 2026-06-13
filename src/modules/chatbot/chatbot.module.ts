@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { HttpModule } from "@nestjs/axios";
 import { WhatsappModule } from "../whatsapp/whatsapp.module";
+import { SgpModule } from "../sgp/sgp.module";
 import { ChatbotService } from "./application/chatbot.service";
 import { WebhookController } from "./webhook.controller";
 import { SessionService } from "./session/session.service";
@@ -15,7 +16,7 @@ import { SessionCron } from "./session/session.cron";
 import { PlanosController } from "./planos/planos.controller";
 
 @Module({
-  imports: [WhatsappModule, HttpModule],
+  imports: [WhatsappModule, HttpModule, SgpModule],
   controllers: [WebhookController, SessionController, PlanosController],
   providers: [
     ChatbotService,
