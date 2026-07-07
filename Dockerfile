@@ -24,6 +24,5 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/auth ./auth
-RUN npm prune --omit=dev \
-	&& npx prisma generate
-CMD ["node", "dist/main.js"]
+RUN npx prisma generate
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/main.js"]
