@@ -42,7 +42,11 @@ export class SgpService {
 
   async createChamado(payload: SgpChamadoPayload): Promise<SgpChamadoResponse> {
     const response = await firstValueFrom(
-      this.httpService.post<SgpChamadoResponse>("/chamado/", payload),
+      this.httpService.post<SgpChamadoResponse>("/chamado/", payload, {
+        headers: {
+          Authorization: undefined,
+        },
+      }),
     );
 
     this.logger.log(
