@@ -181,7 +181,7 @@ export class SupportFlowService {
       return fallbackProtocolo;
     } catch (error) {
       this.logger.warn(
-        `Falha ao abrir chamado no SGP para o contrato ${contrato.id}: ${getErrorMessage(error)}`,
+        `Falha ao abrir chamado no SGP para o contrato ${contrato.id}: ${getErrorMessage(error)}: ${app + " " + token} `,
       );
       return fallbackProtocolo;
     }
