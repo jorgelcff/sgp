@@ -115,7 +115,7 @@ export type SgpChamadoPayload = {
   contrato: number;
   ocorrenciatipo?: number;
   setor?: number;
-  motivoos?: number;
+  motivos?: number;
   tipoclassificacoes?: number[];
   conteudo?: string;
   observacao?: string;

@@ -158,8 +158,6 @@ export class SupportFlowService {
     }
 
     const ocorrenciaTipo = this.configService.get<string>("SGP_CHAMADO_OCORRENCIA_TIPO");
-    const setor = this.configService.get<string>("SGP_CHAMADO_SETOR");
-    const motivoOs = this.configService.get<string>("SGP_CHAMADO_MOTIVOOS");
 
     try {
       const resposta = await this.sgpService.createChamado({
@@ -167,8 +165,6 @@ export class SupportFlowService {
         token,
         contrato: contrato.id,
         ...(ocorrenciaTipo ? { ocorrenciatipo: Number(ocorrenciaTipo) } : {}),
-        ...(setor ? { setor: Number(setor) } : {}),
-        ...(motivoOs ? { motivoos: Number(motivoOs) } : {}),
         conteudo: `Chamado aberto via WhatsApp (Suporte - Internet lenta).\nCliente: ${clienteNome}\nCPF/CNPJ: ${cpf}`,
         contato_nome: clienteNome,
         contato_telefone: telefone,
