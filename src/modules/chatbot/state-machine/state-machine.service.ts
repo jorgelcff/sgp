@@ -84,8 +84,6 @@ export class StateMachineService {
         return this.handleFinanceMenu(message);
       case ChatState.FINANCEIRO_PEDIR_CPF:
         return this.handleFinanceCpf(message);
-      case ChatState.FINANCEIRO_PROMESSA:
-        return this.handleFinancePromessa(message);
       case ChatState.CONTRATAR_MENU:
         return this.handleContractMenu(message);
       case ChatState.CONTRATAR_PEDIR_DADOS:
@@ -215,15 +213,8 @@ export class StateMachineService {
 
     if (message === "2") {
       return {
-        nextState: ChatState.FINANCEIRO_PEDIR_CPF,
-        responses: this.financeFlow.getCpfRequest(),
-      };
-    }
-
-    if (message === "3") {
-      return {
-        nextState: ChatState.FINANCEIRO_PROMESSA,
-        responses: this.financeFlow.getPromessaPrompt(),
+        nextState: ChatState.MENU_PRINCIPAL,
+        responses: [...this.financeFlow.getPortalAccessInfo(), ...this.mainMenu()],
       };
     }
 
@@ -250,21 +241,6 @@ export class StateMachineService {
     return {
       nextState: ChatState.CONTRATAR_MENU,
       responses: this.contractFlow.getContractMenu(),
-    };
-  }
-
-  private async handleFinancePromessa(
-    message: string,
-  ): Promise<StateMachineResult> {
-    const result = await this.financeFlow.handlePromessa(message);
-    return {
-      nextState: result.nextState,
-      responses: [
-        ...result.responses,
-        ...(result.nextState === ChatState.MENU_PRINCIPAL
-          ? this.mainMenu()
-          : []),
-      ],
     };
   }
 

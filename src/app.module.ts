@@ -4,7 +4,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { DatabaseModule } from "./database/database.module";
-import { SgpModule } from "./modules/sgp/sgp.module";
+import { MkauthModule } from "./modules/mkauth/mkauth.module";
 import { SyncModule } from "./modules/sync/sync.module";
 import { BillingModule } from "./modules/billing/billing.module";
 import { WhatsappModule } from "./modules/whatsapp/whatsapp.module";
@@ -12,6 +12,7 @@ import { ClientesModule } from "./modules/clientes/clientes.module";
 import { NotificacoesModule } from "./modules/notificacoes/notificacoes.module";
 import { HealthModule } from "./modules/health/health.module";
 import { ChatbotModule } from "./modules/chatbot/chatbot.module";
+import { PaymentsModule } from "./modules/payments/payments.module";
 import { BasicAuthGuard } from "./common/guards/basic-auth.guard";
 
 @Module({
@@ -28,7 +29,7 @@ import { BasicAuthGuard } from "./common/guards/basic-auth.guard";
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
-    SgpModule,
+    MkauthModule,
     SyncModule,
     BillingModule,
     WhatsappModule,
@@ -36,6 +37,7 @@ import { BasicAuthGuard } from "./common/guards/basic-auth.guard";
     NotificacoesModule,
     HealthModule,
     ChatbotModule,
+    PaymentsModule,
   ],
   providers: [
     {

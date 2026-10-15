@@ -1,139 +1,243 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../../database/prisma.service";
-import { SgpService } from "../../sgp/infrastructure/sgp.service";
+import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 import {
-  SgpCliente,
-  SgpContatos,
-  SgpContrato,
-  SgpEndereco,
-  SgpServico,
-  SgpTitulo,
-} from "../../sgp/domain/sgp.types";
+  MkauthCliente,
+  MkauthTitulo,
+} from "../../mkauth/domain/mkauth.types";
+
+const PAGE_SIZE = 100;
 
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
-  private readonly limit = 100;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sgpService: SgpService,
+    private readonly mkauthService: MkauthService,
   ) {}
 
   async syncAll(): Promise<void> {
-    this.logger.log("Iniciando sincronizacao paginada do SGP.");
+    this.logger.log("Iniciando sincronizacao paginada do MK-Auth.");
 
-    let offset = 0;
-    let total = 0;
+    let pagina = 1;
+    let totalPaginas = 1;
+    let totalClientes = 0;
 
     do {
-      const response = await this.sgpService.fetchClientsPage(
-        offset,
-        this.limit,
+      const response = await this.mkauthService.listClientes(
+        pagina,
+        PAGE_SIZE,
       );
-      total = response.paginacao.total ?? 0;
+      totalPaginas = response.total_paginas || 1;
       const clientes = response.clientes ?? [];
+      totalClientes += clientes.length;
 
       this.logger.log(
         JSON.stringify({
-          event: "sgp_page_fetched",
-          offset,
-          limit: this.limit,
+          event: "mkauth_page_fetched",
+          pagina,
+          totalPaginas,
           received: clientes.length,
-          total,
         }),
       );
 
       for (const cliente of clientes) {
         try {
-          await this.upsertCliente(cliente);
+          await this.syncCliente(cliente);
         } catch (error) {
           this.logger.error(
             JSON.stringify({
-              event: "sgp_cliente_sync_failed",
-              clienteId: cliente.id,
+              event: "mkauth_cliente_sync_failed",
+              login: cliente.login,
               error: getErrorMessage(error),
             }),
           );
         }
       }
 
-      offset += this.limit;
-    } while (offset < total);
+      pagina += 1;
+    } while (pagina <= totalPaginas);
 
-    this.logger.log("Sincronizacao concluida.");
+    this.logger.log(
+      `Sincronizacao concluida. Clientes processados: ${totalClientes}.`,
+    );
   }
 
-  private async upsertCliente(cliente: SgpCliente): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      const telefone = pickPrimaryPhone(cliente.contatos);
+  private async syncCliente(cliente: MkauthCliente): Promise<void> {
+    const id = Number(cliente.id);
+    if (!Number.isFinite(id)) {
+      this.logger.warn(
+        `Cliente MK-Auth sem id numerico valido (login=${cliente.login}). Ignorado.`,
+      );
+      return;
+    }
 
+    const status = computeStatus(cliente);
+    const telefone = normalizePhone(cliente.celular) ?? normalizePhone(cliente.fone);
+
+    await this.prisma.$transaction(async (tx) => {
       await tx.cliente.upsert({
-        where: { id: cliente.id },
+        where: { id },
         update: {
-          nome: cliente.nome,
-          tipo: cliente.tipo,
-          cpfCnpj: cliente.cpfcnpj,
-          sexo: cliente.sexo,
-          dataNascimento: parseDate(cliente.dataNascimento),
-          dataCadastro: parseDate(cliente.dataCadastro),
-          status: cliente.status,
+          nome: cliente.nome ?? "",
+          tipo: cliente.pessoa ?? null,
+          cpfCnpj: cliente.cpf_cnpj || null,
+          dataNascimento: parseIsoDate(cliente.nascimento),
+          dataCadastro: parseBrDate(cliente.cadastro),
+          status,
           telefone,
         },
         create: {
-          id: cliente.id,
-          nome: cliente.nome,
-          tipo: cliente.tipo,
-          cpfCnpj: cliente.cpfcnpj,
-          sexo: cliente.sexo,
-          dataNascimento: parseDate(cliente.dataNascimento),
-          dataCadastro: parseDate(cliente.dataCadastro),
-          status: cliente.status,
+          id,
+          nome: cliente.nome ?? "",
+          tipo: cliente.pessoa ?? null,
+          cpfCnpj: cliente.cpf_cnpj || null,
+          dataNascimento: parseIsoDate(cliente.nascimento),
+          dataCadastro: parseBrDate(cliente.cadastro),
+          status,
           telefone,
         },
       });
 
-      if (cliente.endereco) {
-        await upsertEndereco(tx, {
-          clienteId: cliente.id,
-          endereco: cliente.endereco,
-        });
-      }
+      await upsertEndereco(tx, { clienteId: id, cliente });
 
-      await upsertContatos(tx, cliente.id, cliente.contatos);
+      // Contrato/Servico sao sinteticos: o MK-Auth modela 1 login = 1 plano,
+      // sem a hierarquia cliente->contrato->servico que o SGP tinha.
+      await tx.contrato.upsert({
+        where: { id },
+        update: {
+          clienteId: id,
+          status,
+          contratoCentralLogin: cliente.login || null,
+          contratoCentralSenha: cliente.senha || null,
+        },
+        create: {
+          id,
+          clienteId: id,
+          status,
+          contratoCentralLogin: cliente.login || null,
+          contratoCentralSenha: cliente.senha || null,
+        },
+      });
 
-      for (const contrato of cliente.contratos ?? []) {
-        await upsertContrato(tx, cliente.id, contrato);
-      }
+      await upsertEndereco(tx, { contratoId: id, cliente });
 
-      for (const titulo of cliente.titulos ?? []) {
-        await upsertTitulo(tx, cliente.id, titulo);
+      await tx.servico.upsert({
+        where: { id },
+        update: {
+          contratoId: id,
+          tipo: cliente.tipo || null,
+          planoDescricao: cliente.plano || null,
+          status,
+          login: cliente.login || null,
+          senha: cliente.senha || null,
+          mac: cliente.mac || null,
+          ip: cliente.ip || null,
+        },
+        create: {
+          id,
+          contratoId: id,
+          tipo: cliente.tipo || null,
+          planoDescricao: cliente.plano || null,
+          status,
+          login: cliente.login || null,
+          senha: cliente.senha || null,
+          mac: cliente.mac || null,
+          ip: cliente.ip || null,
+        },
+      });
+
+      await upsertEndereco(tx, { servicoId: id, cliente });
+
+      await upsertContatos(tx, id, cliente);
+    });
+
+    if (cliente.cpf_cnpj) {
+      await this.syncTitulos(id, cliente.cpf_cnpj);
+    }
+  }
+
+  private async syncTitulos(clienteId: number, cpfCnpj: string): Promise<void> {
+    const [abertos, vencidos] = await Promise.all([
+      this.mkauthService.titulosAbertos(cpfCnpj).catch(() => ({
+        Total: 0,
+        titulos: [] as MkauthTitulo[],
+      })),
+      this.mkauthService.titulosVencidos(cpfCnpj).catch(() => ({
+        Total: 0,
+        titulos: [] as MkauthTitulo[],
+      })),
+    ]);
+
+    const porUuid = new Map<string, MkauthTitulo>();
+    for (const titulo of [
+      ...(abertos.titulos ?? []),
+      ...(vencidos.titulos ?? []),
+    ]) {
+      if (titulo.uuid) {
+        porUuid.set(titulo.uuid, titulo);
       }
+    }
+
+    for (const titulo of porUuid.values()) {
+      await this.upsertTitulo(clienteId, titulo);
+    }
+  }
+
+  private async upsertTitulo(
+    clienteId: number,
+    titulo: MkauthTitulo,
+  ): Promise<void> {
+    const status = titulo.status === "vencido" ? "aberto" : titulo.status;
+    const numeroDocumento = titulo.titulo ? Number(titulo.titulo) : undefined;
+
+    const data = {
+      clienteId,
+      contratoId: clienteId,
+      status,
+      valor: titulo.valor ? Number(titulo.valor) : undefined,
+      numeroDocumento: Number.isFinite(numeroDocumento)
+        ? numeroDocumento
+        : undefined,
+      linhaDigitavel: titulo.linhadig || undefined,
+      codigoPix: titulo.pix || undefined,
+      dataVencimento: parseSqlDate(titulo.datavenc),
+    };
+
+    await this.prisma.titulo.upsert({
+      where: { id: titulo.uuid },
+      update: data,
+      create: { id: titulo.uuid, ...data },
     });
   }
 }
 
 async function upsertEndereco(
-  tx: Prisma.TransactionClient,
+  tx: Parameters<Parameters<PrismaService["$transaction"]>[0]>[0],
   params: {
     clienteId?: number;
     contratoId?: number;
     servicoId?: number;
-    endereco: SgpEndereco;
+    cliente: MkauthCliente;
   },
 ): Promise<void> {
-  const { endereco } = params;
+  const { cliente } = params;
+  if (!cliente.endereco && !cliente.cep) {
+    return;
+  }
+
+  const [latitude, longitude] = splitCoordenadas(cliente.coordenadas);
   const data = {
-    logradouro: endereco.logradouro,
-    numero: endereco.numero !== undefined ? String(endereco.numero) : undefined,
-    bairro: endereco.bairro,
-    cidade: endereco.cidade,
-    uf: endereco.uf,
-    cep: endereco.cep,
-    complemento: endereco.complemento,
-    latitude: endereco.latitude,
-    longitude: endereco.longitude,
+    logradouro: cliente.endereco || null,
+    numero: cliente.numero || null,
+    bairro: cliente.bairro || null,
+    cidade: cliente.cidade || null,
+    uf: cliente.estado || null,
+    cep: cliente.cep || null,
+    complemento: cliente.complemento || null,
+    latitude,
+    longitude,
     clienteId: params.clienteId,
     contratoId: params.contratoId,
     servicoId: params.servicoId,
@@ -164,192 +268,27 @@ async function upsertEndereco(
   }
 }
 
-async function upsertContrato(
-  tx: Prisma.TransactionClient,
-  clienteId: number,
-  contrato: SgpContrato,
-): Promise<void> {
-  await tx.contrato.upsert({
-    where: { id: contrato.id },
-    update: {
-      clienteId,
-      popId: contrato.pop_id,
-      dataCadastro: parseDate(contrato.dataCadastro),
-      status: contrato.status,
-      motivoStatus: contrato.motivo_status,
-      vencimento: contrato.vencimento,
-      contratoCentralLogin: contrato.contratoCentralLogin,
-      contratoCentralSenha: contrato.contratoCentralSenha,
-    },
-    create: {
-      id: contrato.id,
-      clienteId,
-      popId: contrato.pop_id,
-      dataCadastro: parseDate(contrato.dataCadastro),
-      status: contrato.status,
-      motivoStatus: contrato.motivo_status,
-      vencimento: contrato.vencimento,
-      contratoCentralLogin: contrato.contratoCentralLogin,
-      contratoCentralSenha: contrato.contratoCentralSenha,
-    },
-  });
-
-  if (contrato.endereco) {
-    await upsertEndereco(tx, {
-      contratoId: contrato.id,
-      endereco: contrato.endereco,
-    });
-  }
-
-  for (const servico of contrato.servicos ?? []) {
-    await upsertServico(tx, contrato.id, servico);
-  }
-}
-
-async function upsertServico(
-  tx: Prisma.TransactionClient,
-  contratoId: number,
-  servico: SgpServico,
-): Promise<void> {
-  await tx.servico.upsert({
-    where: { id: servico.id },
-    update: {
-      contratoId,
-      tipo: servico.tipo,
-      planoId: servico.plano?.id,
-      planoDescricao: servico.plano?.descricao,
-      status: servico.status,
-      login: servico.login,
-      senha: servico.senha,
-      mac: servico.mac,
-      ip: servico.ip,
-      grupo: servico.grupo,
-      wifiSsid: servico.wifi_ssid,
-      wifiPassword: servico.wifi_password,
-      wifiChannel: servico.wifi_channel,
-      wifiSsid5: servico.wifi_ssid_5,
-      wifiPassword5: servico.wifi_password_5,
-      wifiChannel5: servico.wifi_channel_5,
-    },
-    create: {
-      id: servico.id,
-      contratoId,
-      tipo: servico.tipo,
-      planoId: servico.plano?.id,
-      planoDescricao: servico.plano?.descricao,
-      status: servico.status,
-      login: servico.login,
-      senha: servico.senha,
-      mac: servico.mac,
-      ip: servico.ip,
-      grupo: servico.grupo,
-      wifiSsid: servico.wifi_ssid,
-      wifiPassword: servico.wifi_password,
-      wifiChannel: servico.wifi_channel,
-      wifiSsid5: servico.wifi_ssid_5,
-      wifiPassword5: servico.wifi_password_5,
-      wifiChannel5: servico.wifi_channel_5,
-    },
-  });
-
-  if (servico.endereco) {
-    await upsertEndereco(tx, {
-      servicoId: servico.id,
-      endereco: servico.endereco,
-    });
-  }
-}
-
-async function upsertTitulo(
-  tx: Prisma.TransactionClient,
-  clienteId: number,
-  titulo: SgpTitulo,
-): Promise<void> {
-  await tx.titulo.upsert({
-    where: { id: titulo.id },
-    update: {
-      clienteId,
-      contratoId: titulo.clientecontrato_id ?? undefined,
-      portador: titulo.portador,
-      numeroDocumento: titulo.numeroDocumento,
-      nossoNumero: titulo.nossoNumero,
-      link: titulo.link,
-      status: titulo.status ?? "aberto",
-      valor: titulo.valor,
-      valorJuros: titulo.valorJuros,
-      valorMulta: titulo.valorMulta,
-      valorDesconto: titulo.valorDesconto,
-      valorCorrigido: titulo.valorCorrigido,
-      valorPago: titulo.valorPago,
-      jurosDia: titulo.jurosDia,
-      multaDia: titulo.multaDia,
-      diasAtraso: titulo.diasAtraso,
-      codigoBarras: titulo.codigoBarras,
-      linhaDigitavel: titulo.linhaDigitavel,
-      codigoPix: titulo.codigoPix,
-      dataEmissao: parseDate(titulo.dataEmissao),
-      dataVencimento: parseDate(titulo.dataVencimento),
-      dataPagamento: parseDate(titulo.dataPagamento),
-      dataCancelamento: parseDate(titulo.dataCancelamento),
-      demonstrativo: titulo.demonstrativo,
-    },
-    create: {
-      id: titulo.id,
-      clienteId,
-      contratoId: titulo.clientecontrato_id ?? undefined,
-      portador: titulo.portador,
-      numeroDocumento: titulo.numeroDocumento,
-      nossoNumero: titulo.nossoNumero,
-      link: titulo.link,
-      status: titulo.status ?? "aberto",
-      valor: titulo.valor,
-      valorJuros: titulo.valorJuros,
-      valorMulta: titulo.valorMulta,
-      valorDesconto: titulo.valorDesconto,
-      valorCorrigido: titulo.valorCorrigido,
-      valorPago: titulo.valorPago,
-      jurosDia: titulo.jurosDia,
-      multaDia: titulo.multaDia,
-      diasAtraso: titulo.diasAtraso,
-      codigoBarras: titulo.codigoBarras,
-      linhaDigitavel: titulo.linhaDigitavel,
-      codigoPix: titulo.codigoPix,
-      dataEmissao: parseDate(titulo.dataEmissao),
-      dataVencimento: parseDate(titulo.dataVencimento),
-      dataPagamento: parseDate(titulo.dataPagamento),
-      dataCancelamento: parseDate(titulo.dataCancelamento),
-      demonstrativo: titulo.demonstrativo,
-    },
-  });
-}
-
 async function upsertContatos(
-  tx: Prisma.TransactionClient,
+  tx: Parameters<Parameters<PrismaService["$transaction"]>[0]>[0],
   clienteId: number,
-  contatos?: SgpContatos,
+  cliente: MkauthCliente,
 ): Promise<void> {
-  if (!contatos) {
-    return;
+  const incoming: Array<{ tipo: string; valor: string }> = [];
+
+  const celular = normalizePhone(cliente.celular);
+  if (celular) {
+    incoming.push({ tipo: "celular", valor: celular });
   }
 
-  const data = normalizeContacts(contatos).map((value) => ({
-    clienteId,
-    tipo: value.tipo,
-    valor: value.valor,
-  }));
-
-  const unique = new Map<
-    string,
-    { clienteId: number; tipo: string; valor: string }
-  >();
-  for (const item of data) {
-    unique.set(`${item.tipo}:${item.valor}`, item);
+  const fone = normalizePhone(cliente.fone);
+  if (fone && fone !== celular) {
+    incoming.push({ tipo: "telefone", valor: fone });
   }
 
-  const incoming = Array.from(unique.values());
+  if (cliente.email) {
+    incoming.push({ tipo: "email", valor: cliente.email.trim().toLowerCase() });
+  }
 
-  // Remove contacts that no longer exist in SGP so the bot never
-  // reaches phone numbers that were deleted from the customer record.
   if (incoming.length > 0) {
     await tx.contato.deleteMany({
       where: {
@@ -367,90 +306,77 @@ async function upsertContatos(
     await tx.contato.upsert({
       where: {
         clienteId_tipo_valor: {
-          clienteId: item.clienteId,
+          clienteId,
           tipo: item.tipo,
           valor: item.valor,
         },
       },
       update: {},
-      create: item,
+      create: { clienteId, ...item },
     });
   }
 }
 
-function normalizeContacts(
-  contatos: SgpContatos,
-): Array<{ tipo: string; valor: string }> {
-  const entries: Array<{ tipo: string; valor: string }> = [];
-
-  for (const telefone of contatos.telefones ?? []) {
-    const normalized = normalizePhone(telefone);
-    if (normalized) {
-      entries.push({ tipo: "telefone", valor: normalized });
-    }
+function computeStatus(cliente: MkauthCliente): string {
+  if (cliente.bloqueado === "sim") {
+    return "bloqueado";
   }
-
-  for (const celular of contatos.celulares ?? []) {
-    const normalized = normalizePhone(celular);
-    if (normalized) {
-      entries.push({ tipo: "celular", valor: normalized });
-    }
+  if (cliente.cli_ativado && cliente.cli_ativado !== "s") {
+    return "inativo";
   }
-
-  for (const email of contatos.emails ?? []) {
-    if (email) {
-      entries.push({ tipo: "email", valor: email.trim().toLowerCase() });
-    }
-  }
-
-  for (const outro of contatos.outros ?? []) {
-    if (outro) {
-      entries.push({ tipo: "outro", valor: outro.trim() });
-    }
-  }
-
-  return entries;
+  return "ativo";
 }
 
-function pickPrimaryPhone(contatos?: SgpContatos): string | null {
-  if (!contatos) {
-    return null;
+function splitCoordenadas(
+  value?: string | null,
+): [string | undefined, string | undefined] {
+  if (!value) {
+    return [undefined, undefined];
   }
-
-  const celular = contatos.celulares?.[0];
-  if (celular) {
-    return normalizePhone(celular);
-  }
-
-  const telefone = contatos.telefones?.[0];
-  if (telefone) {
-    return normalizePhone(telefone);
-  }
-
-  return null;
+  const [latitude, longitude] = value.split(",").map((v) => v.trim());
+  return [latitude || undefined, longitude || undefined];
 }
 
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, "");
-}
-
-function parseDate(value?: string): Date | null {
+function normalizePhone(value?: string | null): string | null {
   if (!value) {
     return null;
   }
+  const digits = value.replace(/\D/g, "");
+  return digits || null;
+}
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+function parseIsoDate(value?: string | null): Date | null {
+  if (!value) {
     return null;
   }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
-  return date;
+function parseSqlDate(value?: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value.replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseBrDate(value?: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const [, day, month, year] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-
   return String(error);
 }

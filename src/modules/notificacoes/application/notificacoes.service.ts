@@ -6,7 +6,7 @@ export class NotificacoesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async existsForSchedule(params: {
-    tituloId: number;
+    tituloId: string;
     categoria: string;
     referenciaData: Date;
   }): Promise<boolean> {
@@ -25,7 +25,7 @@ export class NotificacoesService {
   }
 
   async registerSent(params: {
-    tituloId: number;
+    tituloId: string;
     clienteId: number;
     categoria: string;
     referenciaData: Date;
@@ -47,7 +47,7 @@ export class NotificacoesService {
   }
 
   async registerFailure(params: {
-    tituloId: number;
+    tituloId: string;
     clienteId: number;
     categoria: string;
     referenciaData: Date;

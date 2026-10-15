@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../../database/prisma.service";
+import { PagamentosService } from "../../payments/application/pagamentos.service";
 import {
   ChatResponse,
   ChatState,
@@ -10,7 +11,10 @@ import {
 export class PaymentFlowService {
   private readonly logger = new Logger(PaymentFlowService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pagamentosService: PagamentosService,
+  ) {}
 
   async handlePayment(
     payload: WebhookPayload,
@@ -108,19 +112,37 @@ export class PaymentFlowService {
         where: { OR: searchFilters },
       });
 
-      if (cliente) {
-        this.logger.log(
-          `Comprovante recebido para cliente ${cliente.id} CPF ${cpf}.`,
-        );
-      } else {
+      if (!cliente) {
         this.logger.warn(`Comprovante recebido sem cliente para CPF ${cpf}.`);
+        return {
+          responses: [
+            {
+              type: "text",
+              text: "Comprovante recebido. Vamos analisar e retornar em breve.",
+            },
+          ],
+          nextState: ChatState.MENU_PRINCIPAL,
+          context: {},
+        };
       }
+
+      this.logger.log(
+        `Comprovante recebido para cliente ${cliente.id} CPF ${cpf}.`,
+      );
+
+      const { tituloEncontrado } = await this.pagamentosService.criarPendente({
+        clienteId: cliente.id,
+        telefone: payload.telefone,
+        mediaUrl: payload.mediaUrl,
+      });
 
       return {
         responses: [
           {
             type: "text",
-            text: "Comprovante recebido. Vamos analisar e retornar em breve.",
+            text: tituloEncontrado
+              ? "Comprovante recebido! Nossa equipe financeira vai confirmar o pagamento em breve."
+              : "Comprovante recebido, mas nao encontrei fatura em aberto no seu cadastro. Nossa equipe vai verificar.",
           },
         ],
         nextState: ChatState.MENU_PRINCIPAL,

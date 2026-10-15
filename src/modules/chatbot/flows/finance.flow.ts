@@ -1,7 +1,5 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { HttpService } from "@nestjs/axios";
-import { firstValueFrom } from "rxjs";
 import { PrismaService } from "../../../database/prisma.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
@@ -9,7 +7,6 @@ import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 export class FinanceFlowService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -21,9 +18,26 @@ export class FinanceFlowService {
           "Financeiro:\n" +
           "1️⃣ - Fatura errada\n" +
           "2️⃣ - Segunda via\n" +
-          "3️⃣ - Desbloqueio 3 dias\n" +
           "0️⃣ - Voltar ao menu principal\n" +
           "Digite 'sair' para encerrar.",
+      },
+    ];
+  }
+
+  // Temporario enquanto a integracao com o MK Link nao esta pronta: em vez de
+  // consultar titulo no banco local (fonte MK-Auth, sendo descontinuada),
+  // libera so o link do portal com a senha inicial padrao.
+  getPortalAccessInfo(): ChatResponse[] {
+    const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
+
+    return [
+      {
+        type: "text",
+        text:
+          "Acesse sua fatura e segunda via direto no portal do cliente:\n" +
+          (portalUrl ?? "Portal indisponivel no momento.") +
+          "\n\nSenha inicial de acesso: 12345678\n" +
+          "Use seu CPF/CNPJ como login. Voce pode trocar a senha depois de entrar.",
       },
     ];
   }
@@ -36,20 +50,6 @@ export class FinanceFlowService {
           "Informe o CPF ou CNPJ do titular para localizar a fatura.\n" +
           "0️⃣ - Voltar ao menu\n" +
           "Digite 'sair' para encerrar.",
-      },
-    ];
-  }
-
-  getPromessaPrompt(): ChatResponse[] {
-    return [
-      {
-        type: "text",
-        text:
-          "Para liberacao por promessa de pagamento, envie os dados neste formato:\n" +
-          "CPF/CNPJ: \n" +
-          "Senha da central: \n" +
-          "ID do contrato: \n" +
-          "\nDigite 0️⃣ para voltar ao menu principal.",
       },
     ];
   }
@@ -117,14 +117,17 @@ export class FinanceFlowService {
       ? formatDate(titulo.dataVencimento)
       : "data nao informada";
 
+    const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
+
     const responses: ChatResponse[] = [
       {
         type: "text",
         text:
           `Segunda via encontrada. Vencimento: ${vencimento}\n` +
-          `Valor: ${valor}\n\n` +
-          `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
-          `https://telecomfibra.sgp.net.br/accounts/central/login`,
+          `Valor: ${valor}` +
+          (portalUrl
+            ? `\n\nVoce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n${portalUrl}`
+            : ""),
       },
     ];
 
@@ -161,144 +164,6 @@ export class FinanceFlowService {
       nextState: ChatState.MENU_PRINCIPAL,
     };
   }
-
-  async handlePromessa(
-    message: string,
-  ): Promise<{ responses: ChatResponse[]; nextState: ChatState }> {
-    const parsed = parsePromessa(message);
-    const missing = requiredPromessa.filter((key) => !parsed[key]);
-
-    if (missing.length > 0) {
-      return {
-        responses: [
-          {
-            type: "text",
-            text:
-              "Faltaram campos: " + missing.join(", ") + ". Preencha todos.",
-          },
-          ...this.getPromessaPrompt(),
-        ],
-        nextState: ChatState.FINANCEIRO_PROMESSA,
-      };
-    }
-
-    const url = this.getPromessaUrl();
-    if (!url) {
-      return {
-        responses: [
-          {
-            type: "text",
-            text: "Servico indisponivel no momento. Tente mais tarde.",
-          },
-        ],
-        nextState: ChatState.MENU_PRINCIPAL,
-      };
-    }
-
-    const payload = new URLSearchParams({
-      cpfcnpj: parsed.cpf!,
-      senha: parsed.senha!,
-      contrato: String(parsed.contrato!),
-    });
-
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post(url, payload.toString(), {
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        }),
-      );
-
-      const data = response.data as any;
-      const liberado = data?.liberado === true;
-      const protocolo = data?.protocolo ?? "-";
-      const msg = data?.msg ?? "";
-
-      return {
-        responses: [
-          {
-            type: "text",
-            text:
-              `Promessa registrada. Protocolo: ${protocolo}. ` +
-              (liberado
-                ? "Servico liberado."
-                : "Solicitacao recebida, aguarde confirmacao.") +
-              (msg ? `\n${msg}` : ""),
-          },
-        ],
-        nextState: ChatState.MENU_PRINCIPAL,
-      };
-    } catch (error) {
-      const detail = extractError(error);
-      return {
-        responses: [
-          {
-            type: "text",
-            text:
-              "Nao consegui processar agora. " +
-              (detail ? `Detalhe: ${detail}` : "Tente novamente mais tarde."),
-          },
-          ...this.getPromessaPrompt(),
-        ],
-        nextState: ChatState.FINANCEIRO_PROMESSA,
-      };
-    }
-  }
-
-  private getPromessaUrl(): string | null {
-    const direct = this.configService.get<string>("SGP_PROMESSA_URL");
-    if (direct) return direct;
-
-    const base = this.configService.get<string>("SGP_URL");
-    if (!base) return null;
-
-    // tentativa de derivar do SGP_URL
-    const replaced = base.replace(
-      /\/api\/ura\/?$/,
-      "/api/central/promessapagamento/",
-    );
-    return replaced || null;
-  }
-}
-
-type PromessaFields = {
-  cpf?: string;
-  senha?: string;
-  contrato?: number;
-};
-
-const requiredPromessa: Array<keyof PromessaFields> = [
-  "cpf",
-  "senha",
-  "contrato",
-];
-
-function parsePromessa(message: string): PromessaFields {
-  const lines = message.split(/\r?\n/);
-  const data: PromessaFields = {};
-
-  for (const line of lines) {
-    const [rawKey, ...rest] = line.split(":");
-    if (!rawKey || rest.length === 0) continue;
-    const key = rawKey.trim().toLowerCase();
-    const value = rest.join(":").trim();
-
-    if (key.startsWith("cpf")) data.cpf = value.replace(/\D/g, "");
-    if (key.startsWith("senha")) data.senha = value;
-    if (key.includes("contrato")) {
-      const num = Number(value.replace(/\D/g, ""));
-      if (!Number.isNaN(num) && num > 0) {
-        data.contrato = num;
-      }
-    }
-  }
-
-  return data;
-}
-
-function extractError(error: any): string {
-  const data = error?.response?.data;
-  if (typeof data === "string") return data;
-  return data?.message || data?.error || "";
 }
 
 function normalizeCpfCnpj(value: string): string | null {

@@ -1,9 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Contrato } from "@prisma/client";
+import { Contrato, Servico } from "@prisma/client";
 import { PrismaService } from "../../../database/prisma.service";
 import { WhatsappQueueService } from "../../whatsapp/infrastructure/whatsapp-queue.service";
-import { SgpService } from "../../sgp/infrastructure/sgp.service";
+import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
@@ -14,7 +14,7 @@ export class SupportFlowService {
     private readonly prisma: PrismaService,
     private readonly whatsappQueue: WhatsappQueueService,
     private readonly configService: ConfigService,
-    private readonly sgpService: SgpService,
+    private readonly mkauthService: MkauthService,
   ) {}
 
   getSupportMenu(): ChatResponse[] {
@@ -77,7 +77,10 @@ export class SupportFlowService {
 
     const cliente = await this.prisma.cliente.findFirst({
       where: { OR: searchFilters },
-      include: { contratos: true },
+      include: {
+        contratos: { include: { servicos: true } },
+        contatos: true,
+      },
     });
 
     if (!cliente) {
@@ -99,7 +102,14 @@ export class SupportFlowService {
       };
     }
 
-    const protocolo = await this.abrirChamado(cliente.id, cliente.nome, cliente.contratos, telefone, cpf);
+    const email = cliente.contatos.find((c) => c.tipo === "email")?.valor;
+    const protocolo = await this.abrirChamado({
+      clienteId: cliente.id,
+      clienteNome: cliente.nome,
+      contratos: cliente.contratos,
+      email,
+      telefone,
+    });
     this.logger.log(
       `Ordem de servico registrada para cliente ${cliente.id} CPF ${cpf}. Protocolo ${protocolo}.`,
     );
@@ -131,65 +141,51 @@ export class SupportFlowService {
     };
   }
 
-  private async abrirChamado(
-    clienteId: number,
-    clienteNome: string,
-    contratos: Contrato[],
-    telefone: string,
-    cpf: string,
-  ): Promise<string> {
+  private async abrirChamado(params: {
+    clienteId: number;
+    clienteNome: string;
+    contratos: (Contrato & { servicos: Servico[] })[];
+    email?: string;
+    telefone: string;
+  }): Promise<string> {
     const fallbackProtocolo = `OS-${Date.now()}`;
 
-    const app = this.configService.get<string>("SGP_APP");
-    const token = this.configService.get<string>("SGP_TOKEN");
-    if (!app || !token) {
+    const contrato = pickContratoAtivo(params.contratos);
+    const login = contrato?.servicos.find((servico) => servico.login)?.login;
+    if (!login) {
       this.logger.warn(
-        "SGP_APP/SGP_TOKEN nao configurados. Chamado registrado apenas localmente.",
+        `Cliente ${params.clienteId} sem login MK-Auth associado. Chamado registrado apenas localmente.`,
       );
       return fallbackProtocolo;
     }
-
-    const contrato = pickContratoAtivo(contratos);
-    if (!contrato) {
-      this.logger.warn(
-        `Cliente ${clienteId} sem contrato ativo. Chamado registrado apenas localmente.`,
-      );
-      return fallbackProtocolo;
-    }
-
-    const ocorrenciaTipo = this.configService.get<string>("SGP_CHAMADO_OCORRENCIA_TIPO");
 
     try {
-      const resposta = await this.sgpService.createChamado({
-        app,
-        token,
-        contrato: contrato.id,
-        ...(ocorrenciaTipo ? { ocorrenciatipo: Number(ocorrenciaTipo) } : {}),
-        conteudo: `Chamado aberto via WhatsApp (Suporte - Internet lenta).\nCliente: ${clienteNome}\nCPF/CNPJ: ${cpf}`,
-        contato_nome: clienteNome,
-        contato_telefone: telefone,
-        notificar_cliente: 1,
+      const resposta = await this.mkauthService.criarChamado({
+        login,
+        nome: params.clienteNome,
+        email: params.email,
+        assunto: "Conexão",
+        prioridade: "alta",
       });
 
-      if (resposta?.protocolo) {
-        return resposta.protocolo;
+      if (resposta?.chamado) {
+        return resposta.chamado;
       }
 
       this.logger.warn(
-        `SGP nao retornou protocolo para o contrato ${contrato.id}. Resposta: ${JSON.stringify(resposta)}.`,
+        `MK-Auth nao retornou numero de chamado para login ${login}. Resposta: ${JSON.stringify(resposta)}.`,
       );
       return fallbackProtocolo;
     } catch (error) {
       this.logger.warn(
-        `Falha ao abrir chamado no SGP para o contrato ${contrato.id}: ${getErrorMessage(error)}: ${"app: " + app + " " + token} `,
+        `Falha ao abrir chamado no MK-Auth para login ${login}: ${getErrorMessage(error)}`,
       );
-      this.logger.warn(`Detalhes do erro: ${JSON.stringify(error)}`);
       return fallbackProtocolo;
     }
   }
 }
 
-function pickContratoAtivo(contratos: Contrato[]): Contrato | null {
+function pickContratoAtivo<T extends Contrato>(contratos: T[]): T | null {
   const ativo = contratos.find((contrato) => isContratoAtivo(contrato.status));
   return ativo ?? contratos[0] ?? null;
 }

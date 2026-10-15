@@ -144,13 +144,15 @@ export class BillingService {
 
       const compact = itens.length > 1;
       const partes: string[] = [];
+      const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
 
       if (compact) {
         const nome = toTitleCase(itens[0].titulo.cliente?.nome ?? "cliente");
         partes.push(
           `Ola ${nome}, voce tem ${itens.length} boletos pendentes:\n\n` +
-            `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
-            `https://telecomfibra.sgp.net.br/accounts/central/login`,
+            (portalUrl
+              ? `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n${portalUrl}`
+              : ""),
         );
       }
 
@@ -165,6 +167,7 @@ export class BillingService {
           linhaDigitavel: item.titulo.linhaDigitavel ?? "",
           codigoBarras: item.titulo.codigoBarras ?? "",
           link: item.titulo.link ?? "",
+          portalUrl: portalUrl ?? "",
           compact,
         }),
       );
@@ -262,7 +265,7 @@ export class BillingService {
 
     if (staleCount > 0) {
       this.logger.warn(
-        `${staleCount} titulo(s) com status "aberto" e vencimento anterior a ${overdueStart.toISOString().slice(0, 10)} (fora da janela de cobranca). Verifique no SGP se devem ser marcados como pagos/cancelados.`,
+        `${staleCount} titulo(s) com status "aberto" e vencimento anterior a ${overdueStart.toISOString().slice(0, 10)} (fora da janela de cobranca). Verifique no MK-Auth se devem ser marcados como pagos/cancelados.`,
       );
     }
   }
@@ -278,6 +281,7 @@ function buildMessageParts(params: {
   linhaDigitavel: string;
   codigoBarras: string;
   link: string;
+  portalUrl: string;
   compact?: boolean;
 }): {
   main: string;
@@ -307,13 +311,15 @@ function buildMessageParts(params: {
   const codigoPix = params.codigoPix.trim();
   const link = params.link.trim();
 
+  const portalNote = params.portalUrl
+    ? `\n\nVoce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n${params.portalUrl}`
+    : "";
+
   const main = params.compact
     ? `📄 Boleto com vencimento em ${dataVencimento}, ${statusInfo}.\n` +
       `Valor atualizado: ${valor}`
     : `Ola ${nome}, seu boleto com vencimento em ${dataVencimento} ${statusInfo}.\n` +
-      `Valor atualizado: ${valor}\n\n` +
-      `Voce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n` +
-      `https://telecomfibra.sgp.net.br/accounts/central/login`;
+      `Valor atualizado: ${valor}${portalNote}`;
 
   return {
     main,

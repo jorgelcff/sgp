@@ -6,7 +6,7 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Get()
-  async check(): Promise<{ sqlite: boolean; sgp: boolean }> {
+  async check(): Promise<{ sqlite: boolean; mkauth: boolean }> {
     return this.healthService.check();
   }
 }

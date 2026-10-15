@@ -1,14 +1,15 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { HttpService } from "@nestjs/axios";
-import { firstValueFrom } from "rxjs";
+import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
 export class ContractFlowService {
+  private readonly logger = new Logger(ContractFlowService.name);
+
   constructor(
     private readonly configService: ConfigService,
-    private readonly httpService: HttpService,
+    private readonly mkauthService: MkauthService,
   ) {}
 
   getContractMenu(): ChatResponse[] {
@@ -93,54 +94,44 @@ export class ContractFlowService {
 
     parsed.datanasc = normalizedDate;
 
-    const url = this.configService.get<string>("CHATBOT_PRECADASTRO_URL");
-    const app = this.configService.get<string>("CHATBOT_PRECADASTRO_APP");
-    const token = this.configService.get<string>("CHATBOT_PRECADASTRO_TOKEN");
-
-    if (!url || !app || !token) {
-      return {
-        responses: [
-          {
-            type: "text",
-            text: "Pre-cadastro indisponivel. Fale com um atendente.",
-          },
-        ],
-        nextState: ChatState.MENU_PRINCIPAL,
-      };
-    }
+    const login = buildLogin(parsed.nome!, parsed.telefone!);
+    const senha = buildSenhaProvisoria();
 
     const payload = {
-      app,
-      token,
       nome: parsed.nome!,
-      cpfcnpj: parsed.cpf!,
+      login,
+      senha,
+      cpf: parsed.cpf!,
       email: parsed.email!,
+      data_nasc: toBrDate(parsed.datanasc!),
+      endereco: parsed.endereco!,
       celular: parsed.telefone!,
-      datanasc: parsed.datanasc!,
-      logradouro: parsed.endereco!,
-      numero: 0,
-      complemento: "",
-      bairro: "",
-      cidade: "",
-      cep: "",
-      uf: "",
-      pais: "BR",
-      pontoreferencia: "",
     };
 
     try {
-      await firstValueFrom(this.httpService.post(url, payload));
+      const resposta = await this.mkauthService.inserirCliente(payload);
+      this.logger.log(
+        `Pre-cadastro criado no MK-Auth. login=${login} status=${resposta?.status}`,
+      );
+
       return {
         responses: [
           {
             type: "text",
-            text: "Pre-cadastro enviado com sucesso! Em breve entraremos em contato.",
+            text:
+              "Cadastro enviado com sucesso!\n" +
+              `Seu login provisorio: ${login}\n` +
+              `Senha provisoria: ${senha}\n\n` +
+              "Nossa equipe vai concluir a ativacao e entrar em contato.",
           },
         ],
         nextState: ChatState.MENU_PRINCIPAL,
       };
     } catch (error) {
       const detail = extractError(error);
+      this.logger.warn(
+        `Falha ao criar pre-cadastro no MK-Auth (login=${login}): ${detail || getErrorMessage(error)}`,
+      );
       return {
         responses: [
           {
@@ -229,4 +220,31 @@ function extractError(error: any): string {
   const data = error?.response?.data;
   if (typeof data === "string") return data;
   return data?.message || data?.error || "";
+}
+
+function toBrDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function buildLogin(nome: string, telefone: string): string {
+  const slug = nome
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "")
+    .slice(0, 10);
+  const suffix = telefone.replace(/\D/g, "").slice(-4) || "0000";
+  return `${slug || "cliente"}${suffix}`;
+}
+
+function buildSenhaProvisoria(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }

@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
 import { HealthController } from "./health.controller";
 import { HealthService } from "./health.service";
-import { SgpModule } from "../sgp/sgp.module";
+import { MkauthModule } from "../mkauth/mkauth.module";
 
 @Module({
-  imports: [SgpModule],
+  imports: [MkauthModule],
   controllers: [HealthController],
   providers: [HealthService],
 })

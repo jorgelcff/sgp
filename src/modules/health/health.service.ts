@@ -1,19 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
-import { SgpService } from "../sgp/infrastructure/sgp.service";
+import { MkauthService } from "../mkauth/infrastructure/mkauth.service";
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sgpService: SgpService,
+    private readonly mkauthService: MkauthService,
   ) {}
 
-  async check(): Promise<{ sqlite: boolean; sgp: boolean }> {
+  async check(): Promise<{ sqlite: boolean; mkauth: boolean }> {
     const sqlite = await this.checkDatabase();
-    const sgp = await this.sgpService.ping();
+    const mkauth = await this.mkauthService.ping();
 
-    return { sqlite, sgp };
+    return { sqlite, mkauth };
   }
 
   private async checkDatabase(): Promise<boolean> {
