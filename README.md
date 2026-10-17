@@ -36,6 +36,9 @@ Bot NestJS com Prisma/SQLite para sincronizar clientes/cobranças do MKLink e op
 3. `npm run prisma:generate` e `npm run prisma:dbpush`
 4. `npm run start:dev`
 
+Para sincronizar em desenvolvimento, execute `npm run build` e depois `npm run sync`
+(ou use `npm run sync:dev` sem a compilacao previa).
+
 Rotas úteis:
 - Health: `GET /health` (Basic Auth com `SGP_USER`/`SGP_PASS`, mantido por compatibilidade)
 - Sync manual: `GET /sync/manual`
@@ -53,6 +56,12 @@ docker compose logs -f app
 ```
 
 O compose expõe a porta 3000 e monta `./prisma`, `./assets`, `./auth` no container. O banco SQLite persiste em `./prisma/sqlite.db` no host.
+
+Para executar a sincronizacao no container, use:
+
+```bash
+docker compose run --rm app sh -c "npx prisma db push --skip-generate && npm run sync"
+```
 
 ## Observações
 
