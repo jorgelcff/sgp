@@ -11,9 +11,9 @@ export class HealthService {
 
   async check(): Promise<{ sqlite: boolean; mkauth: boolean }> {
     const sqlite = await this.checkDatabase();
-    const mkauth = await this.mkauthService.ping();
+    const mklink = await this.mkauthService.ping();
 
-    return { sqlite, mkauth };
+    return { sqlite, mkauth: mklink };
   }
 
   private async checkDatabase(): Promise<boolean> {

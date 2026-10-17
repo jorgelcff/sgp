@@ -151,21 +151,14 @@ export class SupportFlowService {
     const fallbackProtocolo = `OS-${Date.now()}`;
 
     const contrato = pickContratoAtivo(params.contratos);
-    const login = contrato?.servicos.find((servico) => servico.login)?.login;
-    if (!login) {
-      this.logger.warn(
-        `Cliente ${params.clienteId} sem login MK-Auth associado. Chamado registrado apenas localmente.`,
-      );
-      return fallbackProtocolo;
-    }
-
     try {
       const resposta = await this.mkauthService.criarChamado({
-        login,
-        nome: params.clienteNome,
-        email: params.email,
-        assunto: "Conexão",
-        prioridade: "alta",
+        title: "Internet lenta",
+        description: `Cliente ${params.clienteNome} solicitou suporte pelo WhatsApp.`,
+        client_id: String(params.clienteId),
+        client_phone: params.telefone,
+        priority: "medium",
+        ticket_type: "connection",
       });
 
       if (resposta?.chamado) {
@@ -173,12 +166,12 @@ export class SupportFlowService {
       }
 
       this.logger.warn(
-        `MK-Auth nao retornou numero de chamado para login ${login}. Resposta: ${JSON.stringify(resposta)}.`,
+        `MKLink nao retornou numero de chamado para cliente ${params.clienteId}. Resposta: ${JSON.stringify(resposta)}.`,
       );
       return fallbackProtocolo;
     } catch (error) {
       this.logger.warn(
-        `Falha ao abrir chamado no MK-Auth para login ${login}: ${getErrorMessage(error)}`,
+        `Falha ao abrir chamado no MKLink para cliente ${params.clienteId}: ${getErrorMessage(error)}`,
       );
       return fallbackProtocolo;
     }

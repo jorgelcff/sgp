@@ -18,38 +18,48 @@ export class SyncService {
   ) {}
 
   async syncAll(): Promise<void> {
-    this.logger.log("Iniciando sincronizacao paginada do MK-Auth.");
+    this.logger.log("Iniciando sincronizacao paginada do MKLink.");
 
     let pagina = 1;
     let totalPaginas = 1;
     let totalClientes = 0;
+    const clientesProcessados = new Set<number>();
 
     do {
-      const response = await this.mkauthService.listClientes(
+      const response = await this.mkauthService.listarCobrancas(
         pagina,
         PAGE_SIZE,
       );
+      const clientIds = new Set(
+        response.titulos
+          .map((titulo) => Number(titulo.login))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      );
       totalPaginas = response.total_paginas || 1;
-      const clientes = response.clientes ?? [];
-      totalClientes += clientes.length;
 
       this.logger.log(
         JSON.stringify({
-          event: "mkauth_page_fetched",
+          event: "mklink_billings_page_fetched",
           pagina,
           totalPaginas,
-          received: clientes.length,
+          received: response.titulos.length,
         }),
       );
 
-      for (const cliente of clientes) {
+      for (const clientId of clientIds) {
+        if (clientesProcessados.has(clientId)) {
+          continue;
+        }
         try {
+          const cliente = await this.mkauthService.showCliente(String(clientId));
           await this.syncCliente(cliente);
+          clientesProcessados.add(clientId);
+          totalClientes += 1;
         } catch (error) {
           this.logger.error(
             JSON.stringify({
-              event: "mkauth_cliente_sync_failed",
-              login: cliente.login,
+              event: "mklink_cliente_sync_failed",
+              clientId,
               error: getErrorMessage(error),
             }),
           );
@@ -153,28 +163,17 @@ export class SyncService {
       await upsertContatos(tx, id, cliente);
     });
 
-    if (cliente.cpf_cnpj) {
-      await this.syncTitulos(id, cliente.cpf_cnpj);
-    }
+    await this.syncTitulos(id);
   }
 
-  private async syncTitulos(clienteId: number, cpfCnpj: string): Promise<void> {
-    const [abertos, vencidos] = await Promise.all([
-      this.mkauthService.titulosAbertos(cpfCnpj).catch(() => ({
-        Total: 0,
-        titulos: [] as MkauthTitulo[],
-      })),
-      this.mkauthService.titulosVencidos(cpfCnpj).catch(() => ({
-        Total: 0,
-        titulos: [] as MkauthTitulo[],
-      })),
-    ]);
+  private async syncTitulos(clienteId: number): Promise<void> {
+    const cobrancas = await this.mkauthService.listarTitulos(clienteId).catch(() => ({
+      Total: 0,
+      titulos: [] as MkauthTitulo[],
+    }));
 
     const porUuid = new Map<string, MkauthTitulo>();
-    for (const titulo of [
-      ...(abertos.titulos ?? []),
-      ...(vencidos.titulos ?? []),
-    ]) {
+    for (const titulo of cobrancas.titulos ?? []) {
       if (titulo.uuid) {
         porUuid.set(titulo.uuid, titulo);
       }
@@ -201,7 +200,9 @@ export class SyncService {
         ? numeroDocumento
         : undefined,
       linhaDigitavel: titulo.linhadig || undefined,
+      codigoBarras: titulo.codigoBarras || undefined,
       codigoPix: titulo.pix || undefined,
+      link: titulo.link || undefined,
       dataVencimento: parseSqlDate(titulo.datavenc),
     };
 

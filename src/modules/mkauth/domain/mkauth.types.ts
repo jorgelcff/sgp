@@ -87,6 +87,8 @@ export type MkauthTitulo = {
   pix?: string;
   pix_link?: string;
   pix_qr?: string;
+  codigoBarras?: string;
+  link?: string;
 };
 
 export type MkauthTituloListResponse = {
@@ -119,11 +121,12 @@ export type MkauthChamadoAssunto =
   | "Outros";
 
 export type MkauthChamadoInsertPayload = {
-  login: string;
-  nome?: string;
-  email?: string;
-  assunto: MkauthChamadoAssunto;
-  prioridade?: "baixa" | "normal" | "alta";
+  title: string;
+  description?: string;
+  client_id?: string;
+  client_phone?: string;
+  priority?: string;
+  ticket_type?: string;
 };
 
 export type MkauthChamadoInsertResponse = {

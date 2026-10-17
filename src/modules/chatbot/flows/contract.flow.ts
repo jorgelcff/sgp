@@ -103,7 +103,7 @@ export class ContractFlowService {
       senha,
       cpf: parsed.cpf!,
       email: parsed.email!,
-      data_nasc: toBrDate(parsed.datanasc!),
+      data_nasc: parsed.datanasc!,
       endereco: parsed.endereco!,
       celular: parsed.telefone!,
     };
@@ -220,11 +220,6 @@ function extractError(error: any): string {
   const data = error?.response?.data;
   if (typeof data === "string") return data;
   return data?.message || data?.error || "";
-}
-
-function toBrDate(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-");
-  return `${day}/${month}/${year}`;
 }
 
 function buildLogin(nome: string, telefone: string): string {

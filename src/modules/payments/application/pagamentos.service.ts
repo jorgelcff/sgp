@@ -90,10 +90,10 @@ export class PagamentosService {
       );
 
       this.logger.log(
-        `Pagamento ${id} aprovado. Titulo ${pendente.tituloId} baixado no MK-Auth.`,
+        `Pagamento ${id} aprovado. Cobranca ${pendente.tituloId} confirmada no MKLink.`,
       );
 
-      return `Pagamento aprovado e titulo ${pendente.tituloId} baixado no MK-Auth.`;
+      return `Pagamento aprovado e cobranca ${pendente.tituloId} confirmada no MKLink.`;
     } catch (error) {
       const message = getErrorMessage(error);
       await this.prisma.pagamentoPendente.update({
@@ -105,7 +105,7 @@ export class PagamentosService {
         `Falha ao dar baixa no titulo ${pendente.tituloId} (pagamento ${id}): ${message}`,
       );
 
-      return `Falha ao dar baixa no MK-Auth: ${message}. O pagamento continua pendente, tente novamente.`;
+      return `Falha ao confirmar no MKLink: ${message}. O pagamento continua pendente, tente novamente.`;
     }
   }
 

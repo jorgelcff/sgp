@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../../database/prisma.service";
+import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
@@ -8,6 +9,7 @@ export class FinanceFlowService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly mkauthService: MkauthService,
   ) {}
 
   getFinanceMenu(): ChatResponse[] {
@@ -112,6 +114,7 @@ export class FinanceFlowService {
       };
     }
 
+    const pagamento = await this.mkauthService.obterPagamento(titulo.id).catch(() => null);
     const valor = formatCurrency(titulo.valorCorrigido ?? titulo.valor ?? 0);
     const vencimento = titulo.dataVencimento
       ? formatDate(titulo.dataVencimento)
@@ -131,10 +134,14 @@ export class FinanceFlowService {
       },
     ];
 
-    if (titulo.codigoPix) {
+    const codigoPix = pagamento?.pix_code ?? titulo.codigoPix;
+    const codigoBarras = pagamento?.barcode ?? titulo.codigoBarras;
+    const link = pagamento?.payment_url ?? titulo.link;
+
+    if (codigoPix) {
       responses.push(
         { type: "text", text: `Pix copia e cola:` },
-        { type: "text", text: titulo.codigoPix },
+        { type: "text", text: codigoPix },
       );
     }
 
@@ -145,17 +152,17 @@ export class FinanceFlowService {
       );
     }
 
-    if (titulo.codigoBarras) {
+    if (codigoBarras) {
       responses.push(
         { type: "text", text: `Codigo de barras:` },
-        { type: "text", text: titulo.codigoBarras },
+        { type: "text", text: codigoBarras },
       );
     }
 
-    if (titulo.link) {
+    if (link) {
       responses.push({
         type: "text",
-        text: `Link do boleto:\n${titulo.link}`,
+        text: `Link do boleto:\n${link}`,
       });
     }
 
