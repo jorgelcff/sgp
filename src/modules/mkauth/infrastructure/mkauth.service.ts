@@ -59,6 +59,18 @@ export class MkauthService {
     };
   }
 
+  async buscarClientePorDocumento(
+    document: string,
+  ): Promise<MkauthCliente | null> {
+    const response = await this.request<MklinkClientListResponse>({
+      method: "GET",
+      url: "/clients",
+      params: { document, per_page: 10 },
+    });
+    const client = response.clients?.[0];
+    return client ? normalizeClient(client) : null;
+  }
+
   async inserirCliente(
     payload: MkauthClienteInsertPayload,
   ): Promise<MkauthClienteInsertResponse> {

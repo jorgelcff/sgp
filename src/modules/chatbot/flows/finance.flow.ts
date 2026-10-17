@@ -1,14 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../../../database/prisma.service";
 import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 import { ChatResponse, ChatState } from "../state-machine/state-machine.types";
 
 @Injectable()
 export class FinanceFlowService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
     private readonly mkauthService: MkauthService,
   ) {}
 
@@ -22,24 +18,6 @@ export class FinanceFlowService {
           "2️⃣ - Segunda via\n" +
           "0️⃣ - Voltar ao menu principal\n" +
           "Digite 'sair' para encerrar.",
-      },
-    ];
-  }
-
-  // Temporario enquanto a integracao com o MK Link nao esta pronta: em vez de
-  // consultar titulo no banco local (fonte MK-Auth, sendo descontinuada),
-  // libera so o link do portal com a senha inicial padrao.
-  getPortalAccessInfo(): ChatResponse[] {
-    const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
-
-    return [
-      {
-        type: "text",
-        text:
-          "Acesse sua fatura e segunda via direto no portal do cliente:\n" +
-          (portalUrl ?? "Portal indisponivel no momento.") +
-          "\n\nSenha inicial de acesso: 12345678\n" +
-          "Use seu CPF/CNPJ como login. Voce pode trocar a senha depois de entrar.",
       },
     ];
   }
@@ -72,15 +50,7 @@ export class FinanceFlowService {
       };
     }
 
-    const formatted = formatCpfCnpj(digits);
-    const searchFilters = [
-      { cpfCnpj: { contains: digits } },
-      ...(formatted ? [{ cpfCnpj: { contains: formatted } }] : []),
-    ];
-
-    const cliente = await this.prisma.cliente.findFirst({
-      where: { OR: searchFilters },
-    });
+    const cliente = await this.mkauthService.buscarClientePorDocumento(digits);
 
     if (!cliente) {
       return {
@@ -94,13 +64,23 @@ export class FinanceFlowService {
       };
     }
 
-    const titulo = await this.prisma.titulo.findFirst({
-      where: {
-        clienteId: cliente.id,
-        status: "aberto",
-      },
-      orderBy: { dataVencimento: "desc" },
-    });
+    const clienteId = Number(cliente.id);
+    if (!Number.isInteger(clienteId)) {
+      return {
+        responses: [
+          {
+            type: "text",
+            text: "Encontrei seu cadastro, mas nao consegui localizar o identificador financeiro. Nossa equipe vai verificar.",
+          },
+        ],
+        nextState: ChatState.MENU_PRINCIPAL,
+      };
+    }
+
+    const titulos = await this.mkauthService.titulosAbertos(clienteId);
+    const titulo = [...titulos.titulos].sort((a, b) =>
+      (a.datavenc ?? "").localeCompare(b.datavenc ?? ""),
+    )[0];
 
     if (!titulo) {
       return {
@@ -114,27 +94,25 @@ export class FinanceFlowService {
       };
     }
 
-    const pagamento = await this.mkauthService.obterPagamento(titulo.id).catch(() => null);
-    const valor = formatCurrency(titulo.valorCorrigido ?? titulo.valor ?? 0);
-    const vencimento = titulo.dataVencimento
-      ? formatDate(titulo.dataVencimento)
+    const pagamento = await this.mkauthService
+      .obterPagamento(titulo.uuid)
+      .catch(() => null);
+    const valor = formatCurrency(Number(titulo.valor ?? 0));
+    const dataVencimento = titulo.datavenc ? new Date(titulo.datavenc) : null;
+    const vencimento = dataVencimento && !Number.isNaN(dataVencimento.getTime())
+      ? formatDate(dataVencimento)
       : "data nao informada";
-
-    const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
 
     const responses: ChatResponse[] = [
       {
         type: "text",
         text:
           `Segunda via encontrada. Vencimento: ${vencimento}\n` +
-          `Valor: ${valor}` +
-          (portalUrl
-            ? `\n\nVoce tambem pode acessar todas as suas faturas diretamente pela central do cliente informando seu CPF:\n${portalUrl}`
-            : ""),
+          `Valor: ${valor}`,
       },
     ];
 
-    const codigoPix = pagamento?.pix_code ?? titulo.codigoPix;
+    const codigoPix = pagamento?.pix_code ?? titulo.pix;
     const codigoBarras = pagamento?.barcode ?? titulo.codigoBarras;
     const link = pagamento?.payment_url ?? titulo.link;
 
@@ -145,10 +123,10 @@ export class FinanceFlowService {
       );
     }
 
-    if (titulo.linhaDigitavel) {
+    if (titulo.linhadig) {
       responses.push(
         { type: "text", text: `Linha digitavel:` },
-        { type: "text", text: titulo.linhaDigitavel },
+        { type: "text", text: titulo.linhadig },
       );
     }
 
@@ -177,19 +155,6 @@ function normalizeCpfCnpj(value: string): string | null {
   const digits = value.replace(/\D/g, "");
   if (digits.length === 11 || digits.length === 14) {
     return digits;
-  }
-  return null;
-}
-
-function formatCpfCnpj(digits: string): string | null {
-  if (digits.length === 11) {
-    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-  }
-  if (digits.length === 14) {
-    return digits.replace(
-      /(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,
-      "$1.$2.$3/$4-$5",
-    );
   }
   return null;
 }

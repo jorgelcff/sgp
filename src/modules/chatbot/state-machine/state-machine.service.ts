@@ -213,8 +213,8 @@ export class StateMachineService {
 
     if (message === "2") {
       return {
-        nextState: ChatState.MENU_PRINCIPAL,
-        responses: [...this.financeFlow.getPortalAccessInfo(), ...this.mainMenu()],
+        nextState: ChatState.FINANCEIRO_PEDIR_CPF,
+        responses: this.financeFlow.getCpfRequest(),
       };
     }
 
