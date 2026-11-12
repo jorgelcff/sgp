@@ -64,8 +64,10 @@ export class FinanceFlowService {
       };
     }
 
-    const clienteId = Number(cliente.id);
-    if (!Number.isInteger(clienteId)) {
+    // O MKLink devolve o id do cliente como UUID em /clients e aceita tanto o
+    // UUID quanto o id numerico em /billings?client_id=. Nao converter para numero.
+    const clienteId = String(cliente.id ?? "").trim();
+    if (!clienteId) {
       return {
         responses: [
           {
@@ -98,10 +100,7 @@ export class FinanceFlowService {
       .obterPagamento(titulo.uuid)
       .catch(() => null);
     const valor = formatCurrency(Number(titulo.valor ?? 0));
-    const dataVencimento = titulo.datavenc ? new Date(titulo.datavenc) : null;
-    const vencimento = dataVencimento && !Number.isNaN(dataVencimento.getTime())
-      ? formatDate(dataVencimento)
-      : "data nao informada";
+    const vencimento = formatDueDate(titulo.datavenc) ?? "data nao informada";
 
     const responses: ChatResponse[] = [
       {
@@ -166,8 +165,13 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-  }).format(date);
+// A API manda o vencimento como "YYYY-MM-DD". Formatar direto da string evita
+// que o fuso do servidor desloque a data em um dia.
+function formatDueDate(value?: string | null): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec((value ?? "").trim());
+  if (!match) {
+    return null;
+  }
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
 }

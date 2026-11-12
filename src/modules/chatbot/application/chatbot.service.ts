@@ -4,6 +4,7 @@ import { SessionService } from "../session/session.service";
 import { StateMachineService } from "../state-machine/state-machine.service";
 import {
   ChatState,
+  StateMachineResult,
   WebhookPayload,
 } from "../state-machine/state-machine.types";
 import { WhatsappAdapterService } from "../whatsapp-adapter/whatsapp-adapter.service";
@@ -56,11 +57,37 @@ export class ChatbotService {
 
       const context = parseContext(activeSession.contexto);
 
-      const result = await this.stateMachine.handleInput({
-        state,
-        context,
-        payload: { ...payload, telefone },
-      });
+      let result: StateMachineResult;
+      try {
+        result = await this.stateMachine.handleInput({
+          state,
+          context,
+          payload: { ...payload, telefone },
+        });
+      } catch (error) {
+        // Sem isto, qualquer falha no fluxo (ex.: API do MKLink fora do ar)
+        // deixava o cliente sem nenhuma resposta.
+        this.logger.error(
+          `Falha ao processar mensagem de ${telefone} no estado ${state}: ${getErrorMessage(error)}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        await this.whatsappAdapter
+          .sendResponses(telefone, [
+            {
+              type: "text",
+              text:
+                "Nao consegui concluir sua solicitacao agora. Tente novamente em alguns minutos.\n" +
+                "0️⃣ - Voltar ao menu\n" +
+                "Digite 'sair' para encerrar.",
+            },
+          ])
+          .catch((sendError) => {
+            this.logger.warn(
+              `Falha ao enviar aviso de erro para ${telefone}: ${getErrorMessage(sendError)}`,
+            );
+          });
+        return;
+      }
 
       const nextContext = result.context ?? context;
 
