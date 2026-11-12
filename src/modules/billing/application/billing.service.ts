@@ -4,6 +4,7 @@ import { PrismaService } from "../../../database/prisma.service";
 import { ClientesService } from "../../clientes/application/clientes.service";
 import { NotificacoesService } from "../../notificacoes/application/notificacoes.service";
 import { WhatsappQueueService } from "../../whatsapp/infrastructure/whatsapp-queue.service";
+import { MkauthService } from "../../mkauth/infrastructure/mkauth.service";
 
 @Injectable()
 export class BillingService {
@@ -14,6 +15,7 @@ export class BillingService {
     private readonly clientesService: ClientesService,
     private readonly notificacoesService: NotificacoesService,
     private readonly whatsappQueue: WhatsappQueueService,
+    private readonly mkauthService: MkauthService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -145,6 +147,26 @@ export class BillingService {
       const compact = itens.length > 1;
       const partes: string[] = [];
       const portalUrl = this.configService.get<string>("CUSTOMER_PORTAL_URL");
+      const pagamentos = new Map<
+        string,
+        { pix: string; barcode: string; url: string }
+      >();
+
+      for (const item of itens) {
+        const pagamento = await this.mkauthService
+          .obterPagamento(item.titulo.id)
+          .catch((error) => {
+            this.logger.warn(
+              `Falha ao consultar pagamento do titulo ${item.titulo.id}: ${getErrorMessage(error)}`,
+            );
+            return null;
+          });
+        pagamentos.set(item.titulo.id, {
+          pix: pagamento?.pix_code?.trim() || item.titulo.codigoPix || "",
+          barcode: pagamento?.barcode?.trim() || item.titulo.codigoBarras || "",
+          url: pagamento?.payment_url?.trim() || item.titulo.link || "",
+        });
+      }
 
       if (compact) {
         const nome = toTitleCase(itens[0].titulo.cliente?.nome ?? "cliente");
@@ -156,21 +178,28 @@ export class BillingService {
         );
       }
 
-      const mensagensPorItem = itens.map((item) =>
-        buildMessageParts({
+      const mensagensPorItem = itens.map((item) => {
+        const pagamento = pagamentos.get(item.titulo.id);
+        const barcode = pagamento?.barcode ?? item.titulo.codigoBarras ?? "";
+        const linhaDaApi = isLinhaDigitavel(barcode);
+        return buildMessageParts({
           nome: item.titulo.cliente?.nome ?? "cliente",
           dataVencimento: item.titulo.dataVencimento,
           valorCorrigido: item.titulo.valorCorrigido ?? item.titulo.valor ?? 0,
           diasAtraso: Math.max(0, -item.daysDiff),
           diasParaVencer: Math.max(0, item.daysDiff),
-          codigoPix: item.titulo.codigoPix ?? "",
-          linhaDigitavel: item.titulo.linhaDigitavel ?? "",
-          codigoBarras: item.titulo.codigoBarras ?? "",
-          link: item.titulo.link ?? "",
+          codigoPix: pagamento?.pix || item.titulo.codigoPix || "",
+          linhaDigitavel: linhaDaApi
+            ? barcode
+            : (item.titulo.linhaDigitavel ?? ""),
+          codigoBarras: linhaDaApi
+            ? (item.titulo.codigoBarras ?? "")
+            : barcode,
+          link: pagamento?.url || item.titulo.link || "",
           portalUrl: portalUrl ?? "",
           compact,
-        }),
-      );
+        });
+      });
 
       for (const messages of mensagensPorItem) {
         partes.push(
@@ -433,6 +462,15 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function isLinhaDigitavel(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  return trimmed.includes(" ") || digits.length >= 47;
 }
 
 function isContractChargeable(contractStatus?: string | null): boolean {

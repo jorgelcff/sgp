@@ -303,8 +303,7 @@ function normalizeClient(
     cidade: stringValue(address.city ?? client.city),
     estado: stringValue(address.uf ?? client.uf),
     cep: stringValue(address.cep ?? client.cep),
-    bloqueado: String(client.status ?? ""),
-    cli_ativado: String(client.status ?? ""),
+    ...legacyFlagsFromMklinkStatus(client.status),
     login: String(client.pppoe_login ?? ""),
     senha: String(client.pppoe_password ?? ""),
     plano: String(client.plan_id ?? ""),
@@ -377,6 +376,34 @@ function stringValue(value: unknown): string | undefined {
     : value == null
       ? undefined
       : String(value);
+}
+
+function legacyFlagsFromMklinkStatus(status: unknown): {
+  bloqueado: string;
+  cli_ativado: string;
+} {
+  const value = String(status ?? "")
+    .trim()
+    .toLowerCase();
+
+  // O cadastro antigo usava bloqueado=sim/nao e cli_ativado=s/n.
+  // Na API do MKLink o status cadastral e active, pending, suspended ou cancelled.
+  // Bloqueio de acesso (inadimplencia) nao entra aqui: esses clientes ainda recebem aviso.
+  if (
+    [
+      "suspended",
+      "suspenso",
+      "cancelled",
+      "canceled",
+      "cancelado",
+      "inactive",
+      "inativo",
+    ].includes(value)
+  ) {
+    return { bloqueado: "nao", cli_ativado: "n" };
+  }
+
+  return { bloqueado: "nao", cli_ativado: "s" };
 }
 
 function isOpenTitle(titulo: MkauthTitulo): boolean {
