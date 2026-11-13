@@ -40,6 +40,11 @@ export class BillingService {
     );
     const overdueStart = addDays(today, -overdueDays);
 
+    const maxTentativas = Math.max(
+      1,
+      getNumberEnv(this.configService, "BILLING_MAX_ATTEMPTS", 3),
+    );
+
     await this.logStaleTitulos(overdueStart);
 
     const titulos = await this.prisma.titulo.findMany({
@@ -96,6 +101,7 @@ export class BillingService {
         tituloId: titulo.id,
         categoria: schedule.category,
         referenciaData: today,
+        maxTentativas,
       });
       if (alreadyNotified) {
         continue;
@@ -244,6 +250,7 @@ export class BillingService {
         }
       } catch (error) {
         const errorMessage = getErrorMessage(error);
+        const permanente = isPermanentFailure(error);
         this.logger.error(
           `Falha ao enviar WhatsApp para cliente ${clienteId}: ${errorMessage}`,
         );
@@ -267,7 +274,8 @@ export class BillingService {
             ]
               .filter(Boolean)
               .join("\n\n"),
-            error: errorMessage,
+            error: getErrorDetail(error) ?? errorMessage,
+            permanente,
           });
         }
 
@@ -418,6 +426,36 @@ function getNumberEnv(
 ): number {
   const value = Number(configService.get<string>(key));
   return Number.isNaN(value) ? fallback : value;
+}
+
+// 4xx (exceto 429) vindo do provedor de WhatsApp: o numero/payload foi
+// recusado e repetir nao muda o resultado.
+function isPermanentFailure(error: unknown): boolean {
+  const status = (error as { response?: { status?: unknown } })?.response
+    ?.status;
+  return (
+    typeof status === "number" && status >= 400 && status < 500 && status !== 429
+  );
+}
+
+// Motivo devolvido pelo provedor (ex.: "The provided JID does not exist on
+// WhatsApp."), mais util que "Request failed with status code 422".
+function getErrorDetail(error: unknown): string | null {
+  const response = (
+    error as { response?: { status?: unknown; data?: unknown } }
+  )?.response;
+  const data = response?.data as
+    | string
+    | { message?: unknown; error?: unknown; detail?: unknown }
+    | undefined;
+  const reason =
+    typeof data === "string"
+      ? data
+      : (data?.message ?? data?.error ?? data?.detail);
+  if (typeof reason !== "string" || !reason.trim()) {
+    return null;
+  }
+  return `${response?.status ?? "erro"}: ${reason.trim()}`;
 }
 
 function isRateLimit(message: string): boolean {

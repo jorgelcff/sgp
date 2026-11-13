@@ -15,6 +15,9 @@ type QueueItem = {
   payload: Payload;
   resolve: () => void;
   reject: (error: unknown) => void;
+  // Itens enfileirados juntos (ex.: as partes de uma cobranca). Se um falhar,
+  // os demais sao descartados em vez de insistir no mesmo numero.
+  batch?: { failed: boolean; error?: unknown };
 };
 
 @Injectable()
@@ -80,11 +83,13 @@ export class WhatsappQueueService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let remaining = payloads.length;
+      const batch: QueueItem["batch"] = { failed: false };
       for (const payload of payloads) {
         this.push(
           {
             phone,
             payload,
+            batch,
             resolve: () => {
               remaining -= 1;
               if (remaining === 0) {
@@ -115,11 +120,21 @@ export class WhatsappQueueService {
     try {
       let item = this.nextItem();
       while (item) {
+        if (item.batch?.failed) {
+          item.reject(item.batch.error);
+          item = this.nextItem();
+          continue;
+        }
+
         const target = this.resolveTargetPhone(item.phone);
         try {
           await this.sendWithRetry(target, item.payload);
           item.resolve();
         } catch (error) {
+          if (item.batch) {
+            item.batch.failed = true;
+            item.batch.error = error;
+          }
           item.reject(error);
         }
 
@@ -195,7 +210,15 @@ export class WhatsappQueueService {
           `Tentativa ${attempt}/${maxAttempts} falhou para ${target} (status=${status ?? "unknown"}${detail ? ", " + detail : ""}).`,
         );
 
-        if (attempt >= maxAttempts) {
+        // 4xx (exceto 429) e erro definitivo, como numero sem WhatsApp:
+        // repetir nao muda o resultado e so aumenta o risco de bloqueio.
+        const isPermanent =
+          typeof status === "number" &&
+          status >= 400 &&
+          status < 500 &&
+          !is429;
+
+        if (isPermanent || attempt >= maxAttempts) {
           throw error;
         }
 

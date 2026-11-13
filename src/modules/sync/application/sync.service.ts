@@ -358,6 +358,13 @@ function parseSqlDate(value?: string | null): Date | null {
   if (!value) {
     return null;
   }
+  // "YYYY-MM-DD" sem hora seria lido como meia-noite UTC, que em Brasilia cai
+  // no dia anterior. O vencimento e uma data de calendario: usa meia-noite local.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
   const date = new Date(value.replace(" ", "T"));
   return Number.isNaN(date.getTime()) ? null : date;
 }

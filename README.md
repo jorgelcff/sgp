@@ -26,7 +26,8 @@ Bot NestJS com Prisma/SQLite para sincronizar clientes/cobranças do MKLink e op
 - `WASENDER_WEBHOOK_SECRET` (para validar /webhook/whatsapp via header `x-webhook-secret` ou `?secret=`)
 - Throttle: `THROTTLE_TTL`, `THROTTLE_LIMIT`
 - Billing: `BILLING_MAX_PER_RUN`, `BILLING_DELAY_MS`, `BILLING_OVERDUE_DAYS`. O envio de cobranca nao e mais diario: cada cobranca aberta recebe no maximo uma mensagem em D-5, D-1 e D0 (antes do vencimento) e em D+1, D+3, D+7, D+15, D+30 (apos o vencimento, limitado por `BILLING_OVERDUE_DAYS`). A consulta tambem ordena por `dataVencimento` (mais antigos primeiro), priorizando as cobrancas mais urgentes dentro do limite de `BILLING_MAX_PER_RUN`. Cobrancas elegiveis do mesmo cliente sao agrupadas em um unico envio.
-- `BILLING_HOUR_START` / `BILLING_HOUR_END` (padrao 8 / 20): janela de horario em que a cobranca automatica roda (fora dela, a execucao do cron e pulada). O endpoint manual `GET /billing/run` ignora essa janela.
+- `BILLING_HOUR_START` / `BILLING_HOUR_END` (padrao 8 / 20): janela de horario em que a cobranca automatica roda (fora dela, a execucao do cron e pulada). O endpoint manual `GET /billing/run` ignora essa janela. A hora e a do fuso do processo: o `docker-compose.yml` define `TZ=America/Recife`.
+- `BILLING_MAX_ATTEMPTS` (padrao 3): quantas vezes no mesmo dia a cobranca tenta reenviar um aviso que falhou por erro temporario. Recusas definitivas do provedor (4xx, ex.: numero sem WhatsApp) ficam com status `invalido` e nao sao repetidas no dia.
 - `HUMAN_HANDOFF_HOURS` (padrao 4): tempo que o bot fica em silencio para um numero apos um atendente humano responder manualmente pelo mesmo WhatsApp.
 
 ## Desenvolvimento local

@@ -3,6 +3,10 @@ services:
     build: .
     container_name: sgp-app
     env_file: .env
+    environment:
+      # A janela BILLING_HOUR_START/END e a regua de vencimento usam a hora
+      # local do processo. Sem isto o container roda em UTC (3h a frente).
+      TZ: America/Recife
     ports:
       - "3000:3000"
     volumes:
